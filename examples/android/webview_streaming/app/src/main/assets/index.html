@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <meta content="utf-8" http-equiv="encoding">
+    <title>Anbox Streaming SDK Example</title>
+</head>
+
+<body>
+<link rel="stylesheet" type="text/css" href="./css/style.css">
+<script type="module">
+    import {AnboxStream, AnboxStreamGatewayConnector} from './js/anbox-stream-sdk.js';
+
+    // Connectors will enable communication between the client and the
+    // gateway. They can be customized to add an additional layer between
+    // the client and the gateway in order to add more features (user management,
+    // limits, analytics, etc).
+    // For instance, to add user management, you would create a connector that
+    // would communicate with a service you own, which in turn would talk to the
+    // stream gateway to create an actual streaming session.
+    // The connector would pass that session information to the SDK which takes
+    // care of the rest.
+    const connector = new AnboxStreamGatewayConnector({
+        url: '<replace_me_with_valid_stream_gateway_url>',
+        authToken: '<replace_me_with_valid_app_token>',
+        session: {
+            app: "<replace_me_with_valid_application>",
+        },
+    });
+
+    let stream = new AnboxStream({
+        connector: connector,
+        targetElement: "anbox-stream",
+        screen: {
+            width: 1280,
+            height: 720,
+            fps: 25,
+        },
+        controls: {
+          mouse: true,
+        },
+        devices: {
+          speaker: true,
+        },
+        callbacks: {
+            error: error => {
+                console.error("AnboxStream failed: ", error);
+            }
+        }
+    });
+    stream.connect();
+</script>
+<div id="anbox-stream"></div>
+</body>
