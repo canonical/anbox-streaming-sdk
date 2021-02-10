@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <meta content="utf-8" http-equiv="encoding">
+    <title>Anbox Streaming SDK Example</title>
+</head>
+
+<body>
+<script type="module">
+    import {AnboxStream, AnboxStreamGatewayConnector} from './anbox-stream-sdk.js';
+
+    // Connectors will enable communication between the client and the
+    // gateway. They can be customized to add an additional layer between
+    // the client and the gateway in order to add more features (user management,
+    // limits, analytics, etc).
+    // For instance, to add user management, you would create a connector that
+    // would communicate with a service you own, which in turn would talk to the
+    // stream gateway to create an actual streaming session.
+    // The connector would pass that session information to the SDK which takes
+    // care of the rest.
+    const connector = new AnboxStreamGatewayConnector({
+        url: 'https://gateway.url.net',
+        authToken: 'YOUR_AUTH_TOKEN',
+        session: {
+            app: "com.foo.bar",
+        },
+    });
+
+    // The AnboxStream class takes care of the WebRTC signaling process as
+    // well as the web browser integration (inserting video/audio, controls, inputs, etc)
+    let stream = new AnboxStream({
+        connector: connector,
+        targetElement: "anbox-stream",
+        screen: {
+            width: 1280,
+            height: 720,
+            fps: 25,
+        },
+        controls: {
+            keyboard: true
+        },
+        callbacks: {
+            error: error => {
+                window.alert("AnboxStream failed: " + error.message);
+            },
+            requestCameraAccess: () => {
+                return window.confirm("Anbox Cloud requires to access the camera device")
+            }
+        }
+    });
+
+    window.startStream = () => {
+        stream.connect();
+    }
+
+</script>
+    <h1>Anbox Streaming Stack example</h1>
+    <button onclick="window.startStream()">Start</button>
+    <div id="anbox-stream"></div>
+</body>
+</html>

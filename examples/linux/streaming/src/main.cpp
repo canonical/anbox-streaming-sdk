@@ -419,7 +419,7 @@ int main(int argc, char** argv) {
     EXIT_ON_FAILURE(anbox_stream_set_error_callback(ctx.stream, [](AnboxStatus status, void* user_data) {
       std::cerr << "Got error from stream (status " << status << ")" << std::endl;
       // When signaling timeout occurs, abort the client to avoid screen freeze for a long time
-      if (status == ANBOX_STATUS_SIGNALING_TIMEOUT)
+      if (status == ANBOX_STATUS_SIGNALING_TIMEOUT || status == ANBOX_STATUS_SIGNALING_FAILED)
         kill(getpid(), SIGTERM);
     }, nullptr));
 
@@ -428,6 +428,12 @@ int main(int argc, char** argv) {
       auto ctx = reinterpret_cast<Context*>(user_data);
       ctx->audio_buffer.append(audio_data, data_size);
     }, &ctx));
+
+    EXIT_ON_FAILURE(anbox_stream_set_message_received_callback(ctx.stream, [](
+        const char* type, size_t type_size,
+        const char* data, size_t data_size, void *user_data){
+      std::cout << "Received message from container of type '"<< std::string(type, type_size) << "'" << std::endl;
+    }, nullptr));
 
     EXIT_ON_FAILURE(anbox_stream_connect(ctx.stream));
 

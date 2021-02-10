@@ -357,6 +357,18 @@ typedef void (*AnboxStreamDisconnectedCallback)(void* user_data);
 typedef void (*AnboxStreamErrorCallback)(AnboxStatus status, void* user_data);
 
 /**
+* @brief Callback which is called when a message from the remote peer is received
+*
+* @param type pointer to message type
+* @param type_size length of message tyype
+* @param data pointer to message data
+* @param data_size length of message data
+* @param user_data User specific data
+*/
+typedef void (*AnboxMessageReceivedCallback)(
+  const char* type, size_t type_size, const char* data, size_t data_size, void *user_data);
+
+/**
  * @brief Callback to receive log messages from an Anbox Stream object
  *
  * @param level Level of the provided log message
@@ -485,6 +497,17 @@ ANBOX_EXPORT AnboxStatus anbox_stream_config_set_audio_spec(
   AnboxStreamAudioSpec spec);
 
 /**
+ * @brief Set an activity to be displayed in the foreground
+ *
+ * @param cfg Stream configuration object to set the signaling message on
+ * @param activity activity to be displayed in the foreground
+ * @return ANBOX_STATUS_OK on success, error status otherwise
+ * @note Only works with an application that has APK provided on its creation.
+ */
+ANBOX_EXPORT AnboxStatus anbox_stream_config_set_foreground_activity(
+  AnboxStreamConfig* cfg, const char* activity);
+
+/**
  * @brief The AnboxStream object is the central element of the API. It
  * implements the streaming logic and is used to control the active stream.
  */
@@ -573,6 +596,7 @@ ANBOX_EXPORT AnboxStatus anbox_stream_disconnect(AnboxStream* stream);
  * stream to the remote Android instance.
  *
  * @param stream Stream object to send the control message to
+ * @param msg control message object to be sent
  * @return ANBOX_STATUS_OK on success, error status otherwise
  */
 ANBOX_EXPORT AnboxStatus anbox_stream_send_message(
@@ -620,6 +644,17 @@ ANBOX_EXPORT AnboxStatus anbox_stream_render_frame(
  */
 ANBOX_EXPORT AnboxStatus anbox_stream_set_audio_data_ready_callback(
   AnboxStream* stream, AnboxAudioDataReadyCallback callback, void* user_data);
+
+/**
+* @brief Set callback to be notified when a message is received from remote peer
+*
+* @param stream Stream object to register the callback for
+* @param callback Callback function to register
+* @param user_data User specific data
+* @return ANBOX_STATUS_OK on success, error status otherwise
+*/
+ANBOX_EXPORT AnboxStatus anbox_stream_set_message_received_callback(
+ AnboxStream* stream, AnboxMessageReceivedCallback callback, void* user_data);
 #ifdef __cplusplus
 }
 #endif

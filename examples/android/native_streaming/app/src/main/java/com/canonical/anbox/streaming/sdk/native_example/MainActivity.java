@@ -92,6 +92,21 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        Intent launchIntent = getIntent();
+        String apiToken = launchIntent.getStringExtra("api_token");
+        String gatewayURL = launchIntent.getStringExtra("gateway_url");
+        String appName = launchIntent.getStringExtra("app_name");
+        boolean useInsecureTLS = launchIntent.getBooleanExtra("use_insecure_tls", false);
+
+        final EditText apiTokenBox = findViewById(R.id.api_token);
+        apiTokenBox.setText(apiToken);
+        final EditText gatewayURLBox = findViewById(R.id.gateway_url);
+        gatewayURLBox.setText(gatewayURL);
+        final EditText appNameBox = findViewById(R.id.app_name);
+        appNameBox.setText(appName);
+        final Switch useInsecureTLSSwitch = findViewById(R.id.use_insecure_tls);
+        useInsecureTLSSwitch.setChecked(useInsecureTLS);
     }
 
     @RequiresApi(api = Build.VERSION_CODES.KITKAT)

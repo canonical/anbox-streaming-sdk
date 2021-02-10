@@ -45,6 +45,9 @@
         callbacks: {
             error: error => {
                 console.error("AnboxStream failed: ", error);
+            },
+            requestCameraAccess: () => {
+                return window.confirm("Anbox Cloud requires to access the camera device")
             }
         }
     });

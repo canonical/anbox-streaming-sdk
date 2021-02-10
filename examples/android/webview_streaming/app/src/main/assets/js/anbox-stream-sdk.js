@@ -15,16 +15,20 @@ class AnboxStream {
      * @param [options.stunServers[].password] {string} Password used when authenticating with the STUN/TURN server.
      * @param [options.devices] {object} Configuration settings for the streaming client device.
      * @param [options.devices.microphone=false] {boolean} Enable audio capture from microphone and send it to the remote peer.
+     * @param [options.devices.camera=false] {boolean} Enable video capture from camera and send it to the remote peer.
      * @param [options.devices.speaker=true] {boolean} Enable audio playout through the default audio playback device.
      * @param [options.controls] {object} Configuration how the client can interact with the stream.
      * @param [options.controls.keyboard=true] {boolean} Send key presses to the Android instance.
      * @param [options.controls.mouse=true] {boolean} Send mouse events to the Android instance.
      * @param [options.controls.gamepad=true] {boolean} Send gamepad events to the Android instance.
+     * @param [options.foregroundActivity] {string} Activity to be displayed in the foreground. NOTE: it only works with an application that has APK provided on its creation.
      * @param [options.callbacks] {object} A list of callbacks to react on stream lifecycle events.
      * @param [options.callbacks.ready=none] {function} Called when the video and audio stream are ready to be inserted in the DOM.
      * @param [options.callbacks.error=none] {function} Called on stream error with the message as parameter.
      * @param [options.callbacks.done=none] {function} Called when the stream is closed.
+     * @param [options.callbacks.messageReceived=none] {function} Called when a message is received from Anbox.
      * @param [options.callbacks.statsUpdated=none] {function} Called when the overall webrtc peer connection statistics are updated.
+     * @param [options.callbacks.requestCameraAccess=none] {function} Called when Android application tries to open camera device for video streaming.
      * @param [options.experimental] {object} Experimental features. Not recommended on production.
      * @param [options.experimental.disableBrowserBlock=false] {boolean} Don't throw an error if an unsupported browser is detected.
      */
@@ -52,12 +56,15 @@ class AnboxStream {
         this._timer = -1;
         this._disconnectedTimer = -1;
         this._ready = false;
-        this._session_id = "";
+        this._signalingFailed = false;
+        this._sessionID = "";
+        this._allowAccessCamera = false;
 
         // Media streams
         this._videoStream = null;
         this._audioStream = null;
         this._audioInputStream = null;
+        this._videoInputStream = null;
 
         // Control options
         this._modifierState = 0;
@@ -86,6 +93,25 @@ class AnboxStream {
                 bytesReceived: 0
             },
         }
+
+
+        this.controls = {
+            touch: {
+                'mousemove': this._onMouseMove.bind(this),
+                'mousedown': this._onMouseButton.bind(this),
+                'mouseup': this._onMouseButton.bind(this),
+                'mousewheel': this._onMouseWheel.bind(this),
+                'touchstart': this._onTouchStart.bind(this),
+                'touchend': this._onTouchEnd.bind(this),
+                'touchcancel': this._onTouchCancel.bind(this),
+                'touchmove': this._onTouchMove.bind(this),
+            },
+            keyboard: {
+                'keydown': this._onKey.bind(this),
+                'keyup': this._onKey.bind(this),
+                'gamepadconnected': this._queryGamePadEvents.bind(this)
+            }
+        }
     };
 
     _includeStunServers(stun_servers) {
@@ -109,14 +135,14 @@ class AnboxStream {
         try {
             session = await this._options.connector.connect()
         } catch (e) {
-            this._stopStreamingOnError(e.message);
+            this._stopStreamingOnError('connector failed to connect: ' + e.message);
             return
         }
 
-        this._session_id = session.id
+        this._sessionID = session.id
 
         if (session.websocket === undefined || session.websocket.length === 0) {
-            this._stopStreamingOnError('connector did not return signaling information');
+            this._stopStreamingOnError('connector did not return any signaling information');
             return
         }
 
@@ -264,6 +290,9 @@ class AnboxStream {
         if (this._nullOrUndef(options.devices.microphone))
             options.devices.microphone = false;
 
+        if (this._nullOrUndef(options.devices.camera))
+            options.devices.camera = false;
+
         if (this._nullOrUndef(options.devices.speaker))
             options.devices.speaker = true;
 
@@ -291,8 +320,17 @@ class AnboxStream {
         if (this._nullOrUndef(options.callbacks.done))
             options.callbacks.done = () => {};
 
+        if (this._nullOrUndef(options.callbacks.messageReceived))
+            options.callbacks.messageReceived = () => {};
+
+        if (this._nullOrUndef(options.callbacks.requestCameraAccess))
+            options.callbacks.requestCameraAccess = () => { return false };
+
         if (this._nullOrUndef(options.disableBrowserBlock))
             options.disableBrowserBlock = false;
+
+        if (this._nullOrUndef(options.foregroundActivity))
+            options.foregroundActivity = "";
     };
 
     _validateOptions(options) {
@@ -309,6 +347,10 @@ class AnboxStream {
 
         if (typeof(options.connector.disconnect) !== "function")
             throw new Error('missing "disconnect" method on connector');
+
+        if (options.foregroundActivity.length > 0 &&
+            !_activityNamePattern.test(options.foregroundActivity))
+            throw new Error('invalid foreground activity name');
     }
 
     _insertMedia(videoSource, audioSource) {
@@ -368,6 +410,9 @@ class AnboxStream {
         if (this._audioInputStream)
             this._audioInputStream.getTracks().forEach(track => track.stop());
 
+        if (this._videoInputStream)
+            this._videoInputStream.getTracks().forEach(track => track.stop());
+
         if (this._pc !== null) {
             this._pc.close();
             this._pc = null;
@@ -417,7 +462,7 @@ class AnboxStream {
         if (this._videoStream && (!this._options.devices.speaker || this._audioStream)) {
             this._insertMedia(this._videoStream, this._audioStream);
             this._startStatsUpdater();
-            this._options.callbacks.ready(this._session_id);
+            this._options.callbacks.ready(this._sessionID);
         }
     };
 
@@ -500,7 +545,7 @@ class AnboxStream {
 
     _onConnectionTimeout() {
         this._disconnectedTimer = -1;
-        this._stopStreamingOnError('Connection lost');
+        this._stopStreamingOnError('lost WebRTC connection');
     }
 
     _onRtcIceConnectionStateChange() {
@@ -508,7 +553,7 @@ class AnboxStream {
             return;
 
         if (this._pc.iceConnectionState === 'failed') {
-            this._stopStreamingOnError('Failed to establish a connection via ICE');
+            this._stopStreamingOnError('failed to establish a WebRTC connection via ICE');
         } else if (this._pc.iceConnectionState === 'disconnected') {
             // When we end up here the connection may not have closed but we
             // just have a temorary network problem. We wait for a moment and
@@ -516,7 +561,7 @@ class AnboxStream {
             this._disconnectedTimer = window.setTimeout(this._onConnectionTimeout.bind(this), 10 * 1000);
         } else if (this._pc.iceConnectionState === 'closed') {
             if (this._timedout) {
-                this._stopStreamingOnError('Connection timed out');
+                this._stopStreamingOnError('timed out to establish a WebRTC connection as signaler did not respond');
                 return;
             }
             this._stopStreaming();
@@ -542,24 +587,6 @@ class AnboxStream {
                 this._ws.send(JSON.stringify(msg));
         }
     };
-
-    controls = {
-        touch: {
-            'mousemove': this._onMouseMove.bind(this),
-            'mousedown': this._onMouseButton.bind(this),
-            'mouseup': this._onMouseButton.bind(this),
-            'mousewheel': this._onMouseWheel.bind(this),
-            'touchstart': this._onTouchStart.bind(this),
-            'touchend': this._onTouchEnd.bind(this),
-            'touchcancel': this._onTouchCancel.bind(this),
-            'touchmove': this._onTouchMove.bind(this),
-        },
-        keyboard: {
-            'keydown': this._onKey.bind(this),
-            'keyup': this._onKey.bind(this),
-            'gamepadconnected': this._queryGamePadEvents.bind(this)
-        }
-    }
 
     _registerControls() {
         window.addEventListener('resize', this._onResize)
@@ -853,6 +880,20 @@ class AnboxStream {
         }
     };
 
+    _onMessageReceived(event) {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "open-camera") {
+            const spec = JSON.parse(msg.data);
+            if (this._allowAccessCamera || this._options.callbacks.requestCameraAccess()) {
+                this._openCamera(spec);
+            }
+        } else if (msg.type === "close-camera") {
+            this._closeCamera();
+        } else {
+            this._options.callbacks.messageReceived(msg.type, msg.data);
+        }
+    }
+
     _openMicrophone() {
         // NOTE:
         // 1. We must wait for the audio input stream being added
@@ -873,19 +914,94 @@ class AnboxStream {
 
     _onAudioInputStreamAvailable(stream) {
         this._audioInputStream = stream;
-        const audioTracks = this._audioInputStream.getAudioTracks();
-        if (audioTracks.length > 0) {
-            console.log(`using Audio device: ${audioTracks[0].label}`);
-        }
         this._audioInputStream.getTracks().forEach(
             track => this._pc.addTrack(track, this._audioInputStream));
 
         this._createOffer();
     }
 
+    _onVideoInputStreamAvailable(stream) {
+        this._videoInputStream = stream;
+        this._videoInputStream.getTracks().forEach(
+            track => this._pc.addTrack(track, stream));
+    }
+
+    _onRealVideoInputStreamAvailable(stream) {
+      // Replace the existing dummy video stream with the real camera video stream
+      this._pc.getSenders()
+          .filter(sender => sender.track !== null)
+          .map(sender => {
+              return sender.replaceTrack(stream.getTracks().find(
+                  t => t.kind === sender.track.kind), stream);
+      });
+
+      this._videoInputStream = stream;
+      this._allowAccessCamera = true;
+    }
+
+    _openCamera(spec) {
+        const resolution = spec["resolution"]
+        const facingMode = spec["facing-mode"] === "front" ? "user": "environment"
+        const frameRate = spec["frame-rate"]
+        navigator.mediaDevices.getUserMedia({
+            video: {
+                width: resolution.width,
+                height: resolution.height,
+                facingMode: {
+                    ideal: facingMode
+                },
+                frameRate: {
+                    max: frameRate,
+                }
+            },
+        })
+        .then(this._onRealVideoInputStreamAvailable.bind(this))
+        .catch(e => {
+            this._options.callbacks.error(
+              new Error(`failed to open camera: ${e.name}`));
+        })
+    }
+
+    _closeCamera() {
+      let dummy_video_stream = this._createDummyVideoStream()
+
+      if (this._videoInputStream)
+          this._videoInputStream.getTracks().forEach(track => track.stop());
+
+      // Replace the real camera video stream with the dummy video stream
+      this._pc.getSenders()
+          .filter(sender => sender.track !== null)
+          .map(sender => {
+              return sender.replaceTrack(dummy_video_stream.getTracks().find(
+                  t => t.kind === sender.track.kind), dummy_video_stream);
+          });
+      this._videoInputStream = dummy_video_stream;
+    }
+
+    _createDummyVideoStream() {
+        // Create a dummy video track before creating an offer
+        // This enables pc connection to switch to real camera video stream
+        // later when opening the camera device without re-negotiation
+        const container = document.getElementById(this._containerID)
+        let black_video_stream = ({width = container.clientWidth,
+                                   height = container.clientHeight} = {}) => {
+          let canvas = Object.assign(document.createElement("canvas"), {width, height});
+          canvas.getContext('2d').fillRect(0, 0, width, height);
+          let stream = canvas.captureStream();
+          return Object.assign(stream.getVideoTracks()[0], {enabled: false});
+        }
+        let media_stream = (...args) => new MediaStream([black_video_stream(...args)]);
+        return media_stream()
+    }
+
     _createOffer() {
+        if (this._options.devices.camera) {
+            let dummy_video_stream = this._createDummyVideoStream()
+            this._onVideoInputStreamAvailable(dummy_video_stream)
+        }
+
         this._pc.createOffer().then(this._onRtcOfferCreated.bind(this)).catch(function(err) {
-            this._stopStreamingOnError(`failed to create offer: ${err}`);
+            this._stopStreamingOnError(`failed to create WebRTC offer: ${err}`);
         });
     }
 
@@ -906,8 +1022,20 @@ class AnboxStream {
                 audio_direction = 'recvonly'
         }
         this._pc.addTransceiver('audio', {direction: audio_direction})
+        if (this._options.devices.camera) {
+            this._pc.addTransceiver('video', {direction: 'sendonly'})
+        }
         this._pc.addTransceiver('video', {direction: 'recvonly'})
         this._controlChan = this._pc.createDataChannel('control');
+        this._controlChan.addEventListener('message', this._onMessageReceived.bind(this));
+
+        if (this._options.foregroundActivity.length > 0) {
+            let msg = {
+              type: 'settings',
+              foreground_activity: this._options.foregroundActivity,
+            };
+            this._ws.send(JSON.stringify(msg));
+        }
 
         if (this._options.devices.microphone)
             this._openMicrophone();
@@ -916,19 +1044,22 @@ class AnboxStream {
     };
 
     _onWsClose() {
-        if (!this._ready) {
+
+        if (!this._ready || !this._signalingFailed) {
             // When the connection was closed from the gateway side we have to
             // stop the timer here to avoid it triggering when we already
             // terminated our connection
             if (this._timer > 0)
                 window.clearTimeout(this._timer);
+        }
 
-            this._stopStreamingOnError('Connection was interrupted while connecting');
+        if (!this._ready && !this._signalingFailed) {
+            this._stopStreamingOnError('connection to signaler was interrupted while trying to establish a WebRTC connection');
         }
     };
 
     _onWsError(event) {
-        this._stopStreamingOnError('failed to communicate with backend service');
+        this._stopStreamingOnError('failed to communicate with the signaler');
     };
 
     _onWsMessage(event) {
@@ -936,7 +1067,10 @@ class AnboxStream {
         if (msg.type === 'answer') {
             this._pc.setRemoteDescription(new RTCSessionDescription({type: 'answer', sdp: atob(msg.sdp)}));
         } else if (msg.type === 'candidate') {
-            this._pc.addIceCandidate({'candidate': atob(msg.candidate), 'sdpMLineIndex': msg.sdpMLineIndex, 'sdpMid': msg.sdpMid})
+            this._pc.addIceCandidate({'candidate': atob(msg.candidate), 'sdpMLineIndex': msg.sdpMLineIndex, 'sdpMid': msg.sdpMid});
+        } else if (msg.type === 'error') {
+            this._signalingFailed = true;
+            this._stopStreamingOnError(msg.message);
         } else {
             console.log('Unknown message type ' + msg.type);
         }
@@ -1197,6 +1331,8 @@ const _numPadMapper = {
     Add: "Equal",
     Multiply: "Digit8",
 }
+
+const _activityNamePattern = /(^([A-Za-z]{1}[A-Za-z\d_]*\.){2,}|^(\.){1})[A-Za-z][A-Za-z\d_]*$/
 
 class AnboxStreamGatewayConnector {
     _nullOrUndef(obj) { return obj === null || obj === undefined };

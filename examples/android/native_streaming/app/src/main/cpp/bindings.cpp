@@ -107,21 +107,26 @@ class AudioPlayer {
    }
 
    void terminate() {
-     if (player_ != nullptr) {
-       (*player_)->SetPlayState(player_, SL_PLAYSTATE_STOPPED);
-       player_ = nullptr;
-       player_object_ = nullptr;
-     }
-
      if (simple_buffer_queue_ != nullptr) {
        (*simple_buffer_queue_)->Clear(simple_buffer_queue_);
        simple_buffer_queue_ = nullptr;
      }
 
-     volume_ = nullptr;
-     engine_object_ = nullptr;
-     engine_ = nullptr;
+     if (player_ != nullptr) {
+       (*player_)->SetPlayState(player_, SL_PLAYSTATE_STOPPED);
+       (*player_object_)->Destroy(player_object_);
+       player_ = nullptr;
+       player_object_ = nullptr;
+     }
+
+     if (engine_object_ != nullptr) {
+       (*engine_object_)->Destroy(engine_object_);
+       engine_ = nullptr;
+       engine_object_ = nullptr;
+     }
+
      output_mix_object_ = nullptr;
+     volume_ = nullptr;
    }
 
    void add_audio_buffer(const uint8_t* audio_data, size_t len) {
@@ -134,10 +139,12 @@ class AudioPlayer {
      audio_buffer_queue_.pop(&enqueue_audio_chunk_[0], audio_chunk_size);
 
      // Enqueue pcm audio data for playback.
-     auto ret = (*simple_buffer_queue_)->Enqueue(simple_buffer_queue_,
-       &enqueue_audio_chunk_[0], audio_chunk_size);
-     if (ret != SL_RESULT_SUCCESS)
-       __android_log_write(ANDROID_LOG_ERROR, "AnboxStream", "Failed to enqueue audio buffer");
+     if (simple_buffer_queue_) {
+       auto ret = (*simple_buffer_queue_)->Enqueue(simple_buffer_queue_,
+         &enqueue_audio_chunk_[0], audio_chunk_size);
+       if (ret != SL_RESULT_SUCCESS)
+         __android_log_write(ANDROID_LOG_ERROR, "AnboxStream", "Failed to enqueue audio buffer");
+     }
    }
 
   private:
@@ -401,13 +408,12 @@ void on_audio_data_ready(const uint8_t *audio_data, size_t data_size, void *user
   ctx->audio_player.add_audio_buffer(audio_data, data_size);
 }
 
-void on_stream_disconnected(void* user_data) {
-  auto ctx = reinterpret_cast<Context*>(user_data);
+void on_message_received(const char* type, size_t type_size,
+    const char* data, size_t data_size, void *user_data) {
+  __android_log_print(ANDROID_LOG_INFO, "AnboxStream", "Received message from container of type '%s'", type);
+}
 
-  __android_log_write(ANDROID_LOG_INFO, "AnboxStream", "Stream is disconnect");
-
-  stop_stream(ctx);
-
+void report_stream_disconnected(Context* ctx) {
   JNIEnv* env = nullptr;
   if (ctx->vm->AttachCurrentThread(&env, nullptr) != 0)
     return;
@@ -425,6 +431,26 @@ void on_stream_disconnected(void* user_data) {
   }
 
   env->CallVoidMethod(ctx->bindings_obj, on_stream_disconnected_method);
+}
+
+void on_stream_disconnected(void* user_data) {
+  auto ctx = reinterpret_cast<Context*>(user_data);
+
+  __android_log_write(ANDROID_LOG_INFO, "AnboxStream", "Stream is disconnect");
+
+  stop_stream(ctx);
+  report_stream_disconnected(ctx);
+}
+
+void on_error(AnboxStatus status, void* user_data) {
+  if (status != ANBOX_STATUS_SIGNALING_FAILED && status != ANBOX_STATUS_SIGNALING_TIMEOUT)
+    return;
+
+  __android_log_write(ANDROID_LOG_INFO, "AnboxStream", "Signaling failed or timed out");
+
+  auto ctx = reinterpret_cast<Context*>(user_data);
+  stop_stream(ctx);
+  report_stream_disconnected(ctx);
 }
 } // namespace
 
@@ -502,6 +528,8 @@ Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_startStrea
   anbox_stream_set_connected_callback(ctx->stream.get(), on_stream_connected, ctx);
   anbox_stream_set_disconnected_callback(ctx->stream.get(), on_stream_disconnected, ctx);
   anbox_stream_set_audio_data_ready_callback(ctx->stream.get(), on_audio_data_ready, ctx);
+  anbox_stream_set_message_received_callback(ctx->stream.get(), on_message_received, ctx);
+  anbox_stream_set_error_callback(ctx->stream.get(), on_error, ctx);
 
   __android_log_write(ANDROID_LOG_INFO, "AnboxStream", "Connecting Anbox Stream ...");
 
