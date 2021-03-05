@@ -47,6 +47,7 @@ class AnboxStream {
         this._containerID = options.targetElement;
         this._videoID = 'anbox-stream-video-' + this._id;
         this._audioID = 'anbox-stream-audio-' + this._id;
+        this._statsID = 'anbox-stream-stats-' + this._id;
 
         // WebRTC
         this._ws = null; // WebSocket
@@ -73,25 +74,47 @@ class AnboxStream {
         this._lastTouchMoves = [];
 
         // Stats
+        this._showStats = false;
         this._statsTimerId = -1;
         this._timeElapse = 0;
         this._stats = {
             video: {
                 bandwidthMbit: 0,
                 totalBytesReceived: 0,
-                fps: 0
+                fps: 0,
+                decodeTime: 0,
+                jitter: 0,
+                avgJitterBufferDelay: 0,
+                packetsReceived: 0,
+                packetsLost: 0
             },
             network: {
-                currentRtt: 0
+                currentRtt: 0,
+                networkType: "",
+                transportType: "",
+                localCandidateType: "",
+                remoteCandidateType: ""
             },
             audioInput: {
                 bandwidthMbit: 0,
-                bytesSent: 0,
+                totalBytesSent: 0,
             },
             audioOutput: {
                 bandwidthMbit: 0,
-                bytesReceived: 0
+                totalBytesReceived: 0,
+                jitter: 0,
+                avgJitterBufferDelay: 0,
+                totalSamplesReceived: 0,
+                packetsReceived: 0,
+                packetsLost: 0
             },
+            rtcConfig: {
+                bundlePolicy: "",
+                rtcpMuxPolicy: "",
+                sdpSemantics: "",
+                iceTransportPolicy: "",
+                iceCandidatePoolSize: ""
+            }
         }
 
 
@@ -131,6 +154,8 @@ class AnboxStream {
         if (this._options.fullScreen)
             this._requestFullscreen()
 
+        this._createMedia()
+
         let session = {};
         try {
             session = await this._options.connector.connect()
@@ -161,6 +186,19 @@ class AnboxStream {
     disconnect() {
         this._stopStreaming();
         this._options.connector.disconnect();
+    };
+
+    /**
+     * Show overall statistics in an overlay during the streaming.
+     */
+    showStatistics(enabled) {
+        if (!enabled) {
+            let stats = document.getElementById(this._statsID);
+            if (stats)
+                stats.replaceChildren();
+        }
+
+        this._showStats = enabled;
     };
 
     /**
@@ -331,6 +369,9 @@ class AnboxStream {
 
         if (this._nullOrUndef(options.foregroundActivity))
             options.foregroundActivity = "";
+
+        if (this._nullOrUndef(options.showStatistics))
+            options.showStatistics = false;
     };
 
     _validateOptions(options) {
@@ -353,19 +394,27 @@ class AnboxStream {
             throw new Error('invalid foreground activity name');
     }
 
-    _insertMedia(videoSource, audioSource) {
-        this._ready = true;
+    _createMedia() {
         let mediaContainer = document.getElementById(this._containerID);
-        mediaContainer.style.display = "flex"
-        mediaContainer.style.justifyContent = "center"
-        mediaContainer.style.alignItems = "center"
+
+        const stats = document.createElement('div');
+        stats.id = this._statsID;
+        stats.style.position = "absolute";
+        stats.style.width = "250px";
+        stats.style.backgroundColor = "rgba(0,0,0,0.75)";
+        stats.style.color = "white";
+        stats.style.fontSize = "x-small";
+        stats.style.borderRadius = "3px";
+        stats.style.lineHeight = "20px";
+        stats.style.whiteSpace = "pre";
+        // Ignore the pointer interaction on stats overlay
+        stats.style.pointerEvents = "none";
+        mediaContainer.appendChild(stats);
 
         const video = document.createElement('video');
         video.style.margin = "0";
         video.style.height = "auto";
         video.style.width = "auto";
-
-        video.srcObject = videoSource;
         video.muted = true;
         video.autoplay = true;
         video.controls = false;
@@ -380,22 +429,35 @@ class AnboxStream {
         if (this._options.devices.speaker) {
             const audio = document.createElement('audio');
             audio.id = this._audioID;
-            audio.srcObject = audioSource;
             audio.autoplay = true;
             audio.controls = false;
             mediaContainer.appendChild(audio);
         }
+    };
 
+    _insertMediaSource(videoSource, audioSource) {
+        this._ready = true;
+
+        const video = document.getElementById(this._videoID);
+        video.srcObject = videoSource;
+
+        if (this._options.devices.speaker) {
+            const audio = document.getElementById(this._audioID);
+            audio.srcObject = audioSource;
+        }
     };
 
     _removeMedia() {
         const video = document.getElementById(this._videoID);
         const audio = document.getElementById(this._audioID);
+        const stats = document.getElementById(this._statsID);
 
         if (video)
             video.remove();
         if (audio)
             audio.remove();
+        if (stats)
+            stats.remove();
     };
 
     _stopStreaming() {
@@ -460,15 +522,104 @@ class AnboxStream {
 
         // Start streaming until audio and video tracks both are available
         if (this._videoStream && (!this._options.devices.speaker || this._audioStream)) {
-            this._insertMedia(this._videoStream, this._audioStream);
+            this._insertMediaSource(this._videoStream, this._audioStream);
             this._startStatsUpdater();
             this._options.callbacks.ready(this._sessionID);
         }
     };
 
+    _refreshStatistics() {
+        let stats = document.getElementById(this._statsID);
+
+        stats.replaceChildren();
+        const insertHeader = (title) => {
+            let textNode = document.createTextNode(`${title}`);
+            stats.appendChild(textNode);
+
+            let lineBreak = document.createElement("br");
+            stats.appendChild(lineBreak);
+        };
+
+        const insertStat = (type, value) => {
+            let textNode = document.createTextNode(`    ${type}: ${value}`);
+            stats.appendChild(textNode);
+
+            let lineBreak = document.createElement("br");
+            stats.appendChild(lineBreak);
+        };
+
+        const mbits_format = (v) => {
+            return (v * 8 / 1000 / 1000).toFixed(2) + " Mbit/s"
+        }
+
+        const mb_format = (v) => {
+            return (v / 1000 / 1000).toFixed(2) + " MB"
+        }
+
+        const ms_format = (v) => {
+            return (v * 1000).toFixed(2) + " ms"
+        }
+
+        insertHeader("RTC Configuration")
+        if (this._stats.rtcConfig.sdpSemantics !== "")
+          insertStat("sdpSemantics", this._stats.rtcConfig.sdpSemantics)
+        if (this._stats.rtcConfig.rtcpMuxPolicy !== "")
+          insertStat("rtcpMuxPolicy", this._stats.rtcConfig.rtcpMuxPolicy)
+        if (this._stats.rtcConfig.bundlePolicy !== "")
+          insertStat("bundlePolicy", this._stats.rtcConfig.bundlePolicy)
+        if (this._stats.rtcConfig.iceTransportPolicy !== "")
+          insertStat("iceTransportPolicy", this._stats.rtcConfig.iceTransportPolicy)
+        if (this._stats.rtcConfig.iceCandidatePoolSize !== "")
+          insertStat("iceCandidatePoolSize", this._stats.rtcConfig.iceCandidatePoolSize)
+
+        insertHeader("Network")
+        insertStat("currentRtt", ms_format(this._stats.network.currentRtt))
+        insertStat("networkType", this._stats.network.networkType)
+        insertStat("transportType", this._stats.network.transportType)
+        insertStat("localCandidateType", this._stats.network.localCandidateType)
+        insertStat("remoteCandidateType", this._stats.network.remoteCandidateType)
+
+        insertHeader("Video")
+        insertStat("bandWidth", mbits_format(this._stats.video.bandwidthMbit))
+        insertStat("totalBytesReceived", mb_format(this._stats.video.totalBytesReceived))
+        insertStat("fps", this._stats.video.fps)
+        insertStat("decodeTime", ms_format(this._stats.video.decodeTime))
+        insertStat("jitter", ms_format(this._stats.video.jitter))
+        insertStat("avgJitterBufferDelay", ms_format(this._stats.video.avgJitterBufferDelay))
+        insertStat("packetsReceived", this._stats.video.packetsReceived)
+        insertStat("packetsLost", this._stats.video.packetsLost)
+
+        insertHeader("Audio Output")
+        insertStat("bandWidth", mbits_format(this._stats.audioOutput.bandwidthMbit))
+        insertStat("totalBytesReceived", mb_format(this._stats.audioOutput.totalBytesReceived))
+        insertStat("totalSamplesReceived", this._stats.audioOutput.totalSamplesReceived)
+        insertStat("jitter", ms_format(this._stats.audioOutput.jitter))
+        insertStat("avgJitterBufferDelay", ms_format(this._stats.audioOutput.avgJitterBufferDelay))
+        insertStat("packetsReceived", this._stats.audioOutput.packetsReceived)
+        insertStat("packetsLost", this._stats.audioOutput.packetsLost)
+    }
+
     _startStatsUpdater() {
         if (this._nullOrUndef(this._options.callbacks.statsUpdated))
             return
+
+        let pc_conf = this._pc.getConfiguration();
+        if (pc_conf) {
+          if ("sdpSemantics" in pc_conf)
+              this._stats.rtcConfig.sdpSemantics = pc_conf.sdpSemantics
+
+          if ("rtcpMuxPolicy" in pc_conf)
+              this._stats.rtcConfig.rtcpMuxPolicy = pc_conf.rtcpMuxPolicy
+
+          if ("bundlePolicy" in pc_conf)
+              this._stats.rtcConfig.bundlePolicy = pc_conf.bundlePolicy
+
+          if ("iceTransportPolicy" in pc_conf)
+              this._stats.rtcConfig.iceTransportPolicy = pc_conf.iceTransportPolicy
+
+          if ("iceCandidatePoolSize" in pc_conf)
+              this._stats.rtcConfig.iceCandidatePoolSize = pc_conf.iceCandidatePoolSize
+        }
 
         this._statsTimerId = window.setInterval(() => {
             if (this._nullOrUndef(this._pc))
@@ -506,19 +657,19 @@ class AnboxStream {
                                                 diff = bytesSent - this._stats.audioInput.bytesSent;
 
                                             this._stats.audioInput.bandwidthMbit = diff;
-                                            this._stats.audioInput.bytesSent = bytesSent;
+                                            this._stats.audioInput.totalBytesSent = bytesSent;
                                         }
                                     } else {
                                         if ("bytesReceived" in report) {
                                             let bytesReceived = report["bytesReceived"];
                                             let diff = 0;
-                                            if (this._stats.audioOutput.bytesReceived > bytesReceived)
+                                            if (this._stats.audioOutput.totalBytesReceived > bytesReceived)
                                                 diff = bytesReceived;
                                             else
-                                                diff = bytesReceived - this._stats.audioOutput.bytesReceived;
+                                                diff = bytesReceived - this._stats.audioOutput.totalBytesReceived;
 
-                                            this._stats.audioOutput.bandwidthMbit =  diff;
-                                            this._stats.audioOutput.bytesReceived = bytesReceived;
+                                            this._stats.audioOutput.bandwidthMbit = diff;
+                                            this._stats.audioOutput.totalBytesReceived = bytesReceived;
                                         }
                                     }
                                 }
@@ -527,15 +678,61 @@ class AnboxStream {
                             if ("nominated" in report && report["nominated"] &&
                                 "state" in report && report["state"] === "succeeded" &&
                                 "currentRoundTripTime" in report) {
-                                this._stats.network.currentRtt = report["currentRoundTripTime"] * 1000;
-                            }
+                                this._stats.network.currentRtt = report["currentRoundTripTime"];
+                           }
+                           let network = this._stats.network
+                           if (network.networkType === "" ||
+                               network.transportType === "" ||
+                               network.localCandidateType === "" ||
+                               network.remoteCandidateType === "") {
+                               if (report["nominated"] && report["state"] === "succeeded") {
+                                   var localCandidateId = report["localCandidateId"];
+                                   var remoteCandidateId = report["remoteCandidateId"];
+                                   stats.forEach(stat => {
+                                       if (stat.id === localCandidateId) {
+                                           this._stats.network.localCandidateType = stat.candidateType
+                                           this._stats.network.networkType = stat.networkType
+                                       }
+                                       if (stat.id === remoteCandidateId) {
+                                           this._stats.network.remoteCandidateType = stat.candidateType
+                                           this._stats.network.transportType = stat.protocol
+                                       }
+                                   })
+                               }
+                           }
                         } else if (statName === "type" && report["type"] === "inbound-rtp") {
-                            if ("framesDecoded" in report)
-                                this._stats.video.fps = Math.round(report["framesDecoded"] / this._timeElapse);
+                            if (report["kind"] === "video") {
+                                 if ("framesDecoded" in report)
+                                      this._stats.video.fps = Math.round(report["framesDecoded"] / this._timeElapse);
+                                 if ("totalDecodeTime" in report && "framesDecoded" in report && report["framesDecoded"] !== 0)
+                                      this._stats.video.decodeTime = report["totalDecodeTime"] / report["framesDecoded"];
+                                 if ("packetsLost" in report)
+                                      this._stats.video.packetsLost = report["packetsLost"]
+                                 if ("packetsReceived" in report)
+                                      this._stats.video.packetsReceived = report["packetsReceived"]
+                                 if ("jitter" in report)
+                                      this._stats.video.jitter = report["jitter"]
+                                 if ("jitterBufferDelay" in report && "jitterBufferEmittedCount" in report && report["jitterBufferEmittedCount"] !== 0)
+                                      this._stats.video.avgJitterBufferDelay = report["jitterBufferDelay"] / report["jitterBufferEmittedCount"]
+                            } else if (report["kind"] === "audio") {
+                                 if ("totalSamplesReceived" in report)
+                                      this._stats.audioOutput.totalSamplesReceived = report["totalSamplesReceived"]
+                                 if ("packetsLost" in report)
+                                      this._stats.audioOutput.packetsLost = report["packetsLost"]
+                                 if ("packetsReceived" in report)
+                                      this._stats.audioOutput.packetsReceived = report["packetsReceived"]
+                                 if ("jitter" in report)
+                                      this._stats.audioOutput.jitter = report["jitter"]
+                                 if ("jitterBufferDelay" in report && "jitterBufferEmittedCount" in report && report["jitterBufferEmittedCount"] !== 0)
+                                      this._stats.audioOutput.avgJitterBufferDelay = report["jitterBufferDelay"] / report["jitterBufferEmittedCount"]
+                            }
                         }
                     });
                 });
             });
+
+            if (this._showStats)
+                this._refreshStatistics()
 
             this._options.callbacks.statsUpdated(this._stats);
         },
@@ -654,6 +851,15 @@ class AnboxStream {
         // _refreshWindowMath relies on the video having the final dimensions.
         // We MUST do it after the video dimensions have been calculated.
         this._refreshWindowMath()
+
+        // Video elements cannot contain elements inside hence adjust overlay
+        // and align stats overlay to on the left edge of video element after resizing
+        const stats = document.getElementById(this._statsID)
+        if (stats) {
+            const statsMargin = 15
+            stats.style.marginLeft = (this._dimensions.containerOffsetX + statsMargin).toString() + "px"
+            stats.style.marginTop = (this._dimensions.containerOffsetY + statsMargin).toString() + "px"
+        }
     }
 
     _clientToServerX(clientX, d) {
@@ -832,6 +1038,15 @@ class AnboxStream {
         for (let n = 0; n < event.changedTouches.length; n++) {
             let touch = event.changedTouches[n];
             let id = touch.identifier;
+            // FIXME: On iOS(Safari), unlike Chrome, each touch event has a fixed identifier (e.g 0, 1)
+            // to differentiate touch point when multiple touch events are processed at the same time,
+            // the touch.identifier on iOS is a unique natural number increase/decrease progressively,
+            // so it can be a negative/positive number/zero. However the input event to be sent to Android
+            // that bind with the id is ABS_MT_SLOT, which the minimum value of the ABS_MT_SLOT axis must
+            // be 0. In this case, we use the index instead, which could mess up touch sequence a bit
+            // on multi touches, but fix the broken touch input system.
+            if (id < 0 || id > event.changedTouches.length - 1)
+                id = n
             const videoOffset = v.getBoundingClientRect()
             let x = this._clientToServerX(touch.clientX - videoOffset.left, this._dimensions);
             let y = this._clientToServerY(touch.clientY- videoOffset.top, this._dimensions);
@@ -1421,7 +1636,6 @@ class AnboxStreamGatewayConnector {
         }
     };
 
-
     async _createSession() {
         try {
             var extra_data_obj = JSON.parse(this._options.extraData)
@@ -1471,7 +1685,6 @@ class AnboxStreamGatewayConnector {
             stunServers: response.metadata.stun_servers
         };
     };
-
 
     async _joinSession() {
         // Fetch all necessary information about the session including its websocket
