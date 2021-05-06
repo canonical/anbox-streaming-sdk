@@ -72,6 +72,8 @@ class AnboxStream {
         this._dimensions = null;
         this._gamepadManager = null;
         this._lastTouchMoves = [];
+        this._coordConverter = null;
+        this._touchEventProcessor = null;
 
         // Stats
         this._showStats = false;
@@ -135,6 +137,9 @@ class AnboxStream {
                 'gamepadconnected': this._queryGamePadEvents.bind(this)
             }
         }
+
+        this.releaseKeyboard = this.releaseKeyboard.bind(this);
+        this.captureKeyboard = this.captureKeyboard.bind(this);
     };
 
     _includeStunServers(stun_servers) {
@@ -400,6 +405,8 @@ class AnboxStream {
         const stats = document.createElement('div');
         stats.id = this._statsID;
         stats.style.position = "absolute";
+        stats.style.left = "0px";
+        stats.style.top = "0px";
         stats.style.width = "250px";
         stats.style.backgroundColor = "rgba(0,0,0,0.75)";
         stats.style.color = "white";
@@ -788,6 +795,10 @@ class AnboxStream {
     _registerControls() {
         window.addEventListener('resize', this._onResize)
 
+        const v = document.getElementById(this._videoID)
+        this._coordConverter = new _coordinateConverter()
+        this._touchEventProcessor = new TouchEventProcessor(v)
+
         if (this._options.controls.mouse) {
             const video = document.getElementById(this._videoID);
             if (video) {
@@ -796,11 +807,23 @@ class AnboxStream {
             }
         }
 
+        this.captureKeyboard()
+    };
+
+
+    captureKeyboard() {
         if (this._options.controls.keyboard) {
             for (const controlName in this.controls.keyboard)
                 window.addEventListener(controlName, this.controls.keyboard[controlName]);
         }
-    };
+    }
+
+    releaseKeyboard() {
+        if (this._options.controls.keyboard) {
+            for (const controlName in this.controls.keyboard)
+                window.removeEventListener(controlName, this.controls.keyboard[controlName]);
+        }
+    }
 
     _unregisterControls() {
         window.removeEventListener('resize', this._onResize)
@@ -815,10 +838,7 @@ class AnboxStream {
             }
         }
 
-        if (this._options.controls.keyboard) {
-            for (const controlName in this.controls.keyboard)
-                window.removeEventListener(controlName, this.controls.keyboard[controlName]);
-        }
+        this.releaseKeyboard();
     };
 
     _onResize() {
@@ -857,28 +877,10 @@ class AnboxStream {
         const stats = document.getElementById(this._statsID)
         if (stats) {
             const statsMargin = 15
-            stats.style.marginLeft = (this._dimensions.containerOffsetX + statsMargin).toString() + "px"
-            stats.style.marginTop = (this._dimensions.containerOffsetY + statsMargin).toString() + "px"
+            stats.style.left = (this._dimensions.containerOffsetX + statsMargin).toString() + "px"
+            stats.style.top = (this._dimensions.containerOffsetY + statsMargin).toString() + "px"
         }
     }
-
-    _clientToServerX(clientX, d) {
-        let serverX = Math.round((clientX - d.containerOffsetX) * d.scalingFactorX);
-        if (serverX === d.frameW - 1) serverX = d.frameW;
-        if (serverX > d.frameW) serverX = d.frameW;
-        // FIXME: instead of locking the touch here, we should trigger a touchEnd
-        if (serverX < 0) serverX = 0;
-        return serverX;
-    };
-
-    _clientToServerY(clientY, m) {
-        let serverY = Math.round((clientY - m.containerOffsetY) * m.scalingFactorY);
-        if (serverY === m.frameH - 1) serverY = m.frameH;
-        if (serverY > m.frameH) serverY = m.frameH;
-        // FIXME: instead of locking the touch here, we should trigger a touchEnd
-        if (serverY < 0) serverY = 0;
-        return serverY;
-    };
 
     _triggerModifierEvent(event, key) {
         if (event.getModifierState(key)) {
@@ -932,9 +934,10 @@ class AnboxStream {
     };
 
     _onMouseMove(event) {
-        const x = this._clientToServerX(event.offsetX, this._dimensions);
-        const y = this._clientToServerY(event.offsetY, this._dimensions);
-        this._sendInputEvent('mouse-move', {x: x, y: y, rx: event.movementX, ry: event.movementY});
+        const pos = this._coordConverter.convert(
+          {x: event.offsetX, y: event.offsetY}, this._dimensions)
+        this._sendInputEvent('mouse-move', {x: pos.x, y: pos.y,
+          rx: event.movementX, ry: event.movementY});
     };
 
     _onMouseButton(event) {
@@ -1033,24 +1036,10 @@ class AnboxStream {
     };
 
     _touchEvent(event, eventType) {
-        const v = document.getElementById(this._videoID)
         event.preventDefault();
         for (let n = 0; n < event.changedTouches.length; n++) {
-            let touch = event.changedTouches[n];
-            let id = touch.identifier;
-            // FIXME: On iOS(Safari), unlike Chrome, each touch event has a fixed identifier (e.g 0, 1)
-            // to differentiate touch point when multiple touch events are processed at the same time,
-            // the touch.identifier on iOS is a unique natural number increase/decrease progressively,
-            // so it can be a negative/positive number/zero. However the input event to be sent to Android
-            // that bind with the id is ABS_MT_SLOT, which the minimum value of the ABS_MT_SLOT axis must
-            // be 0. In this case, we use the index instead, which could mess up touch sequence a bit
-            // on multi touches, but fix the broken touch input system.
-            if (id < 0 || id > event.changedTouches.length - 1)
-                id = n
-            const videoOffset = v.getBoundingClientRect()
-            let x = this._clientToServerX(touch.clientX - videoOffset.left, this._dimensions);
-            let y = this._clientToServerY(touch.clientY- videoOffset.top, this._dimensions);
-            let e = {id: id, x: x, y: y}
+            const e = this._touchEventProcessor.process(
+              event.changedTouches, n, this._dimensions)
             if (eventType === "touch-move") {
                 // We should not fire the duplicated touch-move event as this will have a bad impact
                 // on Android input dispatching, which could cause ANR if the touched window's input
@@ -1446,6 +1435,28 @@ class _gamepadEventManager {
     }
 }
 
+class _coordinateConverter {
+    convert(pos, dimensions) {
+        const x = this._clientToServerX(pos.x, dimensions);
+        const y = this._clientToServerY(pos.y, dimensions);
+        return {x: x, y: y}
+    };
+
+    _clientToServerX(clientX, d) {
+        let serverX = Math.round((clientX - d.containerOffsetX) * d.scalingFactorX);
+        if (serverX > d.frameW) serverX = d.frameW;
+        if (serverX < 0) serverX = 0;
+        return serverX;
+    };
+
+    _clientToServerY(clientY, d) {
+        let serverY = Math.round((clientY - d.containerOffsetY) * d.scalingFactorY);
+        if (serverY > d.frameH) serverY = d.frameH;
+        if (serverY < 0) serverY = 0;
+        return serverY;
+    };
+}
+
 const _keyScancodes = {
     KeyA: 4,
     KeyB: 5,
@@ -1732,4 +1743,41 @@ class AnboxStreamGatewayConnector {
     disconnect() {}
 }
 
-export { AnboxStreamGatewayConnector, AnboxStream };
+class TouchEventProcessor {
+    _nullOrUndef(obj) { return obj === null || obj === undefined };
+
+    /**
+     * TouchEventProcessor processes and convert to the valid touch events
+     * that Anbox Platform WebRTC accepts.
+     */
+    constructor(video) {
+        if (this._nullOrUndef(video))
+            throw new Error('missing video element');
+        this._video = video;
+        this._coordConverter = new _coordinateConverter();
+    }
+
+    process(touches, index, dimensions) {
+        const touch = touches[index]
+        let id = touch.identifier;
+        // FIXME: On iOS(Safari), unlike Chrome, each touch event has a fixed identifier (e.g 0, 1)
+        // to differentiate touch point when multiple touch events are processed at the same time,
+        // the touch.identifier on iOS is a unique natural number increase/decrease progressively,
+        // so it can be a negative/positive number/zero. However the input event to be sent to Android
+        // that bind with the id is ABS_MT_SLOT, which the minimum value of the ABS_MT_SLOT axis must
+        // be 0. In this case, we use the index instead, which could mess up touch sequence a bit
+        // on multi touches, but fix the broken touch input system.
+        if (id < 0 || id > touches.length - 1)
+            id = index
+
+        const videoOffset = this._video.getBoundingClientRect()
+        const pos = this._coordConverter.convert(
+          {x: touch.clientX - videoOffset.left,
+           y: touch.clientY - videoOffset.top}, dimensions)
+        return {id: id, x: pos.x, y: pos.y}
+    };
+}
+
+window.AnboxStreamGatewayConnector = AnboxStreamGatewayConnector;
+window.AnboxStream = AnboxStream;
+export { AnboxStreamGatewayConnector, AnboxStream, TouchEventProcessor };
