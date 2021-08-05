@@ -29,6 +29,7 @@ class AnboxStream {
      * @param [options.callbacks.messageReceived=none] {function} Called when a message is received from Anbox.
      * @param [options.callbacks.statsUpdated=none] {function} Called when the overall webrtc peer connection statistics are updated.
      * @param [options.callbacks.requestCameraAccess=none] {function} Called when Android application tries to open camera device for video streaming.
+     * @param [options.callbacks.requestMicrophoneAccess=none] {function} Called when Android application tries to open microphone device for video streaming.
      * @param [options.experimental] {object} Experimental features. Not recommended on production.
      * @param [options.experimental.disableBrowserBlock=false] {boolean} Don't throw an error if an unsupported browser is detected.
      */
@@ -60,6 +61,7 @@ class AnboxStream {
         this._signalingFailed = false;
         this._sessionID = "";
         this._allowAccessCamera = false;
+        this._allowAccessMicrophone = false;
 
         // Media streams
         this._videoStream = null;
@@ -368,6 +370,9 @@ class AnboxStream {
 
         if (this._nullOrUndef(options.callbacks.requestCameraAccess))
             options.callbacks.requestCameraAccess = () => { return false };
+
+        if (this._nullOrUndef(options.callbacks.requestMicrophoneAccess))
+            options.callbacks.requestMicrophoneAccess = () => { return false };
 
         if (this._nullOrUndef(options.disableBrowserBlock))
             options.disableBrowserBlock = false;
@@ -825,6 +830,36 @@ class AnboxStream {
         }
     }
 
+    sendIMECommittedText(text) {
+        const data = {text: text}
+        this._sendIMEMessage(_imeEventType.Text, data)
+    };
+
+    sendIMEComposingText(text) {
+        const data = {text: text}
+        this._sendIMEMessage(_imeEventType.ComposingText, data)
+    };
+
+    sendIMETextDeletion(counts) {
+        if (counts <= 0)
+            return;
+        this._sendIMECode(_android_KEYCODE_DEL, counts);
+    };
+
+    sendIMEAction(name, params) {
+        if (typeof params === 'undefined')
+            params = "";
+        const data = {name: name, params: params}
+        this._sendIMEMessage(_imeEventType.Action, data);
+    };
+
+    sendIMEComposingRegion(start, end) {
+        if (start < 0 || start > end)
+            return;
+        const data = {start: start, end: end}
+        this._sendIMEMessage(_imeEventType.ComposingRegion, data);
+    }
+
     _unregisterControls() {
         window.removeEventListener('resize', this._onResize)
 
@@ -904,6 +939,18 @@ class AnboxStream {
         if (this._pc === null || this._controlChan.readyState !== 'open')
             return;
         this._controlChan.send(JSON.stringify({type: type, data: data}));
+    };
+
+   _sendIMECode(code, times) {
+        const data = {code: code, times: times}
+        this._sendIMEMessage(_imeEventType.Keycode, data)
+   }
+
+    _sendIMEMessage(imeEventType, imeData) {
+        if (this._pc === null || this._controlChan.readyState !== 'open')
+            return;
+        const data = {type: imeEventType, data: imeData}
+        this._controlChan.send(JSON.stringify({type: 'input::ime-event', data: data}));
     };
 
     _refreshWindowMath() {
@@ -1087,41 +1134,37 @@ class AnboxStream {
     _onMessageReceived(event) {
         const msg = JSON.parse(event.data);
         if (msg.type === "open-camera") {
-            const spec = JSON.parse(msg.data);
             if (this._allowAccessCamera || this._options.callbacks.requestCameraAccess()) {
+                const spec = JSON.parse(msg.data);
                 this._openCamera(spec);
             }
         } else if (msg.type === "close-camera") {
             this._closeCamera();
+        } else if (msg.type === "enable-microphone") {
+            if (this._allowAccessMicrophone || this._options.callbacks.requestMicrophoneAccess()) {
+                const spec = JSON.parse(msg.data);
+                this._enableMicrophone(spec);
+            }
+        } else if (msg.type === "disable-microphone") {
+            this._disableMicrophone();
         } else {
             this._options.callbacks.messageReceived(msg.type, msg.data);
         }
     }
 
-    _openMicrophone() {
-        // NOTE:
-        // 1. We must wait for the audio input stream being added
-        // to the peer connection before creating offer, otherwise
-        // the remote end won't receive the media track for audio capture.
-        // 2. If a user doesn't grant the permission to use microphone
-        // we still create offer anyway but capturing the audio data from
-        // microphone won't work.
+    _enableMicrophone(spec) {
         navigator.mediaDevices.getUserMedia({
-            audio: true,
+            audio: {
+                sampleRate: spec["freq"],
+                channelCount: spec["channels"],
+                samples: spec["channels"],
+            },
             video: false
         })
-        .then(this._onAudioInputStreamAvailable.bind(this))
+        .then(this._onRealAudioInputStreamAvailable.bind(this))
         .catch(e => {
             this._stopStreamingOnError(`failed to open microphone: ${e.name}`);
         })
-    }
-
-    _onAudioInputStreamAvailable(stream) {
-        this._audioInputStream = stream;
-        this._audioInputStream.getTracks().forEach(
-            track => this._pc.addTrack(track, this._audioInputStream));
-
-        this._createOffer();
     }
 
     _onVideoInputStreamAvailable(stream) {
@@ -1130,17 +1173,20 @@ class AnboxStream {
             track => this._pc.addTrack(track, stream));
     }
 
-    _onRealVideoInputStreamAvailable(stream) {
-      // Replace the existing dummy video stream with the real camera video stream
-      this._pc.getSenders()
-          .filter(sender => sender.track !== null)
-          .map(sender => {
-              return sender.replaceTrack(stream.getTracks().find(
-                  t => t.kind === sender.track.kind), stream);
-      });
+    _onRealAudioInputStreamAvailable(stream) {
+      // Replace the existing dummy video stream with the real audio input stream
+      const kind = stream.getAudioTracks()[0].kind;
+      this._replaceTrack(stream, kind);
+      this._audioInputStream = stream;
+      this._allowAccessMicrophone = true;
+    }
 
-      this._videoInputStream = stream;
-      this._allowAccessCamera = true;
+    _onRealVideoInputStreamAvailable(stream) {
+        // Replace the existing dummy video stream with the real camera video stream
+        const kind = stream.getVideoTracks()[0].kind;
+        this._replaceTrack(stream, kind);
+        this._videoInputStream = stream;
+        this._allowAccessCamera = true;
     }
 
     _openCamera(spec) {
@@ -1167,41 +1213,78 @@ class AnboxStream {
     }
 
     _closeCamera() {
-      let dummy_video_stream = this._createDummyVideoStream()
+        if (this._videoInputStream)
+            this._videoInputStream.getTracks().forEach(track => track.stop());
 
-      if (this._videoInputStream)
-          this._videoInputStream.getTracks().forEach(track => track.stop());
-
-      // Replace the real camera video stream with the dummy video stream
-      this._pc.getSenders()
-          .filter(sender => sender.track !== null)
-          .map(sender => {
-              return sender.replaceTrack(dummy_video_stream.getTracks().find(
-                  t => t.kind === sender.track.kind), dummy_video_stream);
-          });
-      this._videoInputStream = dummy_video_stream;
+        // Replace the real camera video stream with the dummy video stream
+        let stream = new MediaStream([this._createDummyVideoTrack()]);
+        stream.getTracks().forEach(track => track.stop());
+        const kind = stream.getVideoTracks()[0].kind;
+        this._replaceTrack(stream, kind);
+        this._videoInputStream = stream;
     }
 
-    _createDummyVideoStream() {
-        // Create a dummy video track before creating an offer
-        // This enables pc connection to switch to real camera video stream
-        // later when opening the camera device without re-negotiation
-        const container = document.getElementById(this._containerID)
-        let black_video_stream = ({width = container.clientWidth,
-                                   height = container.clientHeight} = {}) => {
-          let canvas = Object.assign(document.createElement("canvas"), {width, height});
-          canvas.getContext('2d').fillRect(0, 0, width, height);
-          let stream = canvas.captureStream();
-          return Object.assign(stream.getVideoTracks()[0], {enabled: false});
+    _disableMicrophone() {
+        if (this._audioInputStream)
+            this._audioInputStream.getTracks().forEach(track => track.stop());
+
+        // Replace the real audio stream captured from microphone with the dummy stream
+        let stream = new MediaStream([this._createDummyAudioTrack()]);
+        stream.getTracks().forEach(track => track.stop());
+        const kind = stream.getAudioTracks()[0].kind;
+        this._replaceTrack(stream, kind);
+        this._audioInputStream = stream;
+    }
+
+    _createDummyStream() {
+        // Create a dummy audio and video tracks before creating an offer
+        // This enables pc connection to switch to real audio and video streams
+        // captured from microphone and camera later when opening the those
+        // devices without re-negotiation.
+        let tracks = [];
+        if (this._options.devices.camera) {
+            let video_track = this._createDummyVideoTrack();
+            tracks.push(video_track);
         }
-        let media_stream = (...args) => new MediaStream([black_video_stream(...args)]);
-        return media_stream()
+        if (this._options.devices.microphone) {
+            let audio_track = this._createDummyAudioTrack();
+            tracks.push(audio_track);
+        }
+        if (tracks.length === 0)
+            return null;
+
+        return new MediaStream(tracks);
+    }
+
+    _createDummyAudioTrack() {
+        let ctx = new AudioContext(), oscillator = ctx.createOscillator();
+        let dst = oscillator.connect(ctx.createMediaStreamDestination());
+        return Object.assign(dst.stream.getAudioTracks()[0], {enabled: false});
+    }
+
+    _createDummyVideoTrack() {
+        const container = document.getElementById(this._containerID);
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        let canvas = Object.assign(document.createElement("canvas"), {width, height});
+        canvas.getContext('2d').fillRect(0, 0, width, height);
+        let stream = canvas.captureStream();
+        return Object.assign(stream.getVideoTracks()[0], {enabled: false});
+    }
+
+    _replaceTrack(stream, kind) {
+        this._pc.getSenders()
+            .filter(sender => (sender.track !== null && sender.track.kind === kind))
+            .map(sender => {
+                return sender.replaceTrack(stream.getTracks().find(
+                  t => t.kind === sender.track.kind));
+            });
     }
 
     _createOffer() {
-        if (this._options.devices.camera) {
-            let dummy_video_stream = this._createDummyVideoStream()
-            this._onVideoInputStreamAvailable(dummy_video_stream)
+        let dummy_stream = this._createDummyStream();
+        if (dummy_stream != null) {
+            this._onVideoInputStreamAvailable(dummy_stream);
         }
 
         this._pc.createOffer().then(this._onRtcOfferCreated.bind(this)).catch(function(err) {
@@ -1241,10 +1324,7 @@ class AnboxStream {
             this._ws.send(JSON.stringify(msg));
         }
 
-        if (this._options.devices.microphone)
-            this._openMicrophone();
-        else
-            this._createOffer();
+        this._createOffer();
     };
 
     _onWsClose() {
@@ -1558,6 +1638,15 @@ const _numPadMapper = {
     Multiply: "Digit8",
 }
 
+const _imeEventType = {
+    Text: 0x1,
+    Keycode: 0x2,
+    Action: 0x3,
+    ComposingText: 0x4,
+    ComposingRegion: 0x5,
+};
+
+const _android_KEYCODE_DEL = 67
 const _activityNamePattern = /(^([A-Za-z]{1}[A-Za-z\d_]*\.){2,}|^(\.){1})[A-Za-z][A-Za-z\d_]*$/
 
 class AnboxStreamGatewayConnector {
@@ -1601,6 +1690,8 @@ class AnboxStreamGatewayConnector {
 
         if (!options.url.includes('https') && !options.url.includes('http'))
             throw new Error('unsupported scheme');
+        else if (options.url.endsWith('/'))
+            options.url = options.url.slice(0, -1);
 
         if (this._nullOrUndef(options.authToken))
             throw new Error('missing authToken parameter');

@@ -1,4 +1,4 @@
-package com.canonical.anbox.streaming.sdk.native_example;
+package com.canonical.anbox.streaming_sdk.native_example;
 
 import android.content.Context;
 
@@ -21,6 +21,6 @@ public class ExampleInstrumentedTest {
     public void useAppContext() {
         // Context of the app under test.
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertEquals("com.canonical.anbox.streaming.sdk.native_example", appContext.getPackageName());
+        assertEquals("com.canonical.anbox.streaming_sdk.native_example", appContext.getPackageName());
     }
 }

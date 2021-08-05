@@ -1,7 +1,14 @@
 
 
 add_library(AnboxStream STATIC IMPORTED)
-set_target_properties(AnboxStream PROPERTIES IMPORTED_LOCATION ${ANBOX_STREAM_SDK_DIR}/libs/linux/${CMAKE_SYSTEM_PROCESSOR}/libanbox-stream.so)
+
+if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL x86_64)
+    set(PKG_ARCH amd64)
+elseif(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL aarch64)
+    set(PKG_ARCH arm64)
+endif()
+
+set_target_properties(AnboxStream PROPERTIES IMPORTED_LOCATION ${ANBOX_STREAM_SDK_DIR}/libs/linux/${PKG_ARCH}/libanbox-stream.so)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}
