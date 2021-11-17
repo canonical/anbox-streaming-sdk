@@ -17,6 +17,7 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
+        <activity android:name=".StreamActivity" android:label="@string/title_activity_stream" android:theme="@style/AppTheme.NoActionBar" android:screenOrientation="landscape"/>
         <activity android:name=".MainActivity"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar.FullScreen">

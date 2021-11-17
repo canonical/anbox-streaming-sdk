@@ -1,5 +1,20 @@
-// Anbox Streaming SDK
-// Copyright 2020 Canonical Ltd.  All rights reserved.
+/*
+ * This file is part of Anbox Cloud Streaming SDK
+ *
+ * Copyright 2021 Canonical Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "jni_helpers.h"
 
@@ -456,7 +471,7 @@ void on_error(AnboxStatus status, void* user_data) {
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_startStreaming(
+Java_com_canonical_anbox_streaming_1sdk_native_1example_NativeBindings_startStreaming(
   JNIEnv *env, jobject thiz, jstring signaling_url, jobjectArray stunServers, jobject surface, jint width, jint height, jboolean  useInsecureTLS) {
   if (!surface || width <= 0 || height <= 0)
     return false;
@@ -544,7 +559,7 @@ Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_startStrea
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_stopStreaming(
+Java_com_canonical_anbox_streaming_1sdk_native_1example_NativeBindings_stopStreaming(
   JNIEnv *env, jobject thiz) {
   auto ctx = get_context(env, thiz);
   if (!ctx)
@@ -561,7 +576,7 @@ Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_stopStream
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendTouchMove(JNIEnv *env, jobject thiz, jint id, jint x, jint y) {
+Java_com_canonical_anbox_streaming_1sdk_native_1example_NativeBindings_sendTouchMove(JNIEnv *env, jobject thiz, jint id, jint x, jint y) {
   auto ctx = get_context(env, thiz);
   if (!ctx)
     return false;
@@ -581,7 +596,7 @@ Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendTouchM
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendTouchStart(
+Java_com_canonical_anbox_streaming_1sdk_native_1example_NativeBindings_sendTouchStart(
   JNIEnv *env, jobject thiz, jint id, jint x, jint y) {
   auto ctx = get_context(env, thiz);
   if (!ctx)
@@ -602,7 +617,7 @@ Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendTouchS
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendTouchEnd(
+Java_com_canonical_anbox_streaming_1sdk_native_1example_NativeBindings_sendTouchEnd(
   JNIEnv *env, jobject thiz, jint id) {
   auto ctx = get_context(env, thiz);
   if (!ctx)
@@ -621,7 +636,7 @@ Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendTouchE
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendTouchCancel(
+Java_com_canonical_anbox_streaming_1sdk_native_1example_NativeBindings_sendTouchCancel(
   JNIEnv *env, jobject thiz, jint id) {
   auto ctx = get_context(env, thiz);
   if (!ctx)
@@ -640,7 +655,7 @@ Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendTouchC
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendMouseMove(
+Java_com_canonical_anbox_streaming_1sdk_native_1example_NativeBindings_sendMouseMove(
   JNIEnv *env, jobject thiz, jint x, jint y, jint rx, jint ry) {
   auto ctx = get_context(env, thiz);
   if (!ctx)
@@ -662,7 +677,7 @@ Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendMouseM
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_canonical_anbox_streaming_sdk_native_1example_NativeBindings_sendMouseButton(
+Java_com_canonical_anbox_streaming_1sdk_native_1example_NativeBindings_sendMouseButton(
   JNIEnv *env, jobject thiz, jint button, jboolean pressed) {
   auto ctx = get_context(env, thiz);
   if (!ctx)

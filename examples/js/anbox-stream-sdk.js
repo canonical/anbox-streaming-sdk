@@ -1,5 +1,20 @@
-// Anbox Stream SDK
-// Copyright 2019 Canonical Ltd.  All rights reserved.
+/*
+ * This file is part of Anbox Cloud Streaming SDK
+ *
+ * Copyright 2021 Canonical Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 class AnboxStream {
     /**
@@ -142,6 +157,7 @@ class AnboxStream {
 
         this.releaseKeyboard = this.releaseKeyboard.bind(this);
         this.captureKeyboard = this.captureKeyboard.bind(this);
+        this._onResize = this._onResize.bind(this);
     };
 
     _includeStunServers(stun_servers) {
@@ -849,6 +865,14 @@ class AnboxStream {
     sendIMEAction(name, params) {
         if (typeof params === 'undefined')
             params = "";
+
+        // If Anbox IME is enabled, the `hide` action was triggered
+        // from client side rather server, we have to remove the focus
+        // from the video container so that the client side virtual
+        // keyboard will pop down afterwards.
+        if (name == "hide")
+           this._setVideoContainerFocused(false);
+
         const data = {name: name, params: params}
         this._sendIMEMessage(_imeEventType.Action, data);
     };
@@ -1147,9 +1171,39 @@ class AnboxStream {
             }
         } else if (msg.type === "disable-microphone") {
             this._disableMicrophone();
+        } else if (msg.type === "show-ime") {
+            // The client-side virtual keyboard will pop down automatically
+            // if a user clicks any area of video element as video element
+            // is not input friendly. So we have to
+            // 1. make video's container editable
+            // 2. set focus on video's container
+            // This prevents client side virtual keyboard from losing focus
+            // and hiding afterward when a user interacts with UI.
+            // Also since AnboxWebView takes over input connection channel,
+            // when anbox ime is enabled and video container is editable,
+            // there would be no text sent to the video container but to
+            // Android container via our own private protocol.
+            if (!this._nullOrUndef(IMEJSInterface)) {
+                this._setVideoContainerFocused(true);
+                IMEJSInterface.openVirtualKeyboard();
+            }
+        } else if (msg.type === "hide-ime") {
+            if (!this._nullOrUndef(IMEJSInterface)) {
+                this._setVideoContainerFocused(false);
+                IMEJSInterface.hideVirtualKeyboard();
+            }
         } else {
             this._options.callbacks.messageReceived(msg.type, msg.data);
         }
+    }
+
+    _setVideoContainerFocused(enabled) {
+        const videoContainer = document.getElementById(this._containerID);
+        videoContainer.contentEditable = enabled;
+        if (videoContainer.contentEditable)
+            videoContainer.focus();
+        else
+            videoContainer.blur();
     }
 
     _enableMicrophone(spec) {

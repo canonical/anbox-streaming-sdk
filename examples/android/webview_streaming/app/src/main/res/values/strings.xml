@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">WebViewStreaming</string>
+    <string name="title_activity_stream">StreamActivity</string>
+    <string name="text_field_gateway_url_hint">URL of the gateway</string>
+    <string name="text_field_api_token_hint">Gateway API token</string>
+    <string name="button_start_streaming">Stream</string>
+    <string name="text_field_app_name_hint">Name of the application to stream</string>
 </resources>

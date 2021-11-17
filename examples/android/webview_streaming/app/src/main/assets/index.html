@@ -21,10 +21,10 @@
     // The connector would pass that session information to the SDK which takes
     // care of the rest.
     const connector = new AnboxStreamGatewayConnector({
-        url: '<replace_me_with_valid_stream_gateway_url>',
-        authToken: '<replace_me_with_valid_app_token>',
+        url: Android.getGetewayURL(),
+        authToken: Android.getAPIToken(),
         session: {
-            app: "<replace_me_with_valid_application>",
+            app: Android.getAppName(),
         },
     });
 
