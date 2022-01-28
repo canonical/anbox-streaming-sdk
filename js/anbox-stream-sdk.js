@@ -1900,6 +1900,13 @@ class TouchEventProcessor {
             throw new Error('missing video element');
         this._video = video;
         this._coordConverter = new _coordinateConverter();
+        // NOTE: `navigator.maxTouchPoints` is undefined for iOS 12 and below,
+        //       in this case, we only support two touch points at most, which
+        //       would enable people to perform basic multi touch operations.
+        //       like pinch to zoom.
+        this._maxTouchPoints = navigator.maxTouchPoints;
+        if (this._nullOrUndef(this._maxTouchPoints))
+             this._maxTouchPoints = 2;
     }
 
     process(touches, index, dimensions) {
@@ -1912,7 +1919,7 @@ class TouchEventProcessor {
         // that bind with the id is ABS_MT_SLOT, which the minimum value of the ABS_MT_SLOT axis must
         // be 0. In this case, we use the index instead, which could mess up touch sequence a bit
         // on multi touches, but fix the broken touch input system.
-        if (id < 0 || id > touches.length - 1)
+        if (id < 0 || id > this._maxTouchPoints - 1)
             id = index
 
         const videoOffset = this._video.getBoundingClientRect()
