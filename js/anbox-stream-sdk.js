@@ -1906,7 +1906,7 @@ class TouchEventProcessor {
         //       like pinch to zoom.
         this._maxTouchPoints = navigator.maxTouchPoints;
         if (this._nullOrUndef(this._maxTouchPoints))
-             this._maxTouchPoints = 2;
+            this._maxTouchPoints = 2;
     }
 
     process(touches, index, dimensions) {
