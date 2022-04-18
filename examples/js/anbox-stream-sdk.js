@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 class AnboxStream {
     /**
      * AnboxStream creates a connection between your client and an Android instance and
@@ -23,7 +22,9 @@ class AnboxStream {
      * @param options: {object}
      * @param options.connector {object} WebRTC Stream connector.
      * @param options.targetElement {string} ID of the DOM element to attach the video to.
-     * @param options.fullScreen {boolean} Stream video in full screen mode. (default: false)
+     * @param [options.fullScreen] {boolean} Stream video in full screen mode. (default: false)
+     * @param [options.deviceType] {string} Send the type of device the SDK is running on to the Android container.
+     * @param [options.enableStats] {boolean} Enable collection of statistics. Not recommended in production.
      * @param [options.stunServers] {object[]} List of additional STUN/TURN servers.
      * @param [options.stunServers[].urls] {string[]} URLs the same STUN/TURN server can be reached on.
      * @param [options.stunServers[].username] {string} Username used when authenticating with the STUN/TURN server.
@@ -47,6 +48,7 @@ class AnboxStream {
      * @param [options.callbacks.requestMicrophoneAccess=none] {function} Called when Android application tries to open microphone device for video streaming.
      * @param [options.experimental] {object} Experimental features. Not recommended on production.
      * @param [options.experimental.disableBrowserBlock=false] {boolean} Don't throw an error if an unsupported browser is detected.
+     * @param [options.experimental.debug=false] {boolean} Print debug logs
      */
     constructor(options) {
         if (this._nullOrUndef(options))
@@ -56,33 +58,31 @@ class AnboxStream {
         this._validateOptions(options);
         this._options = options;
 
-        if (!this._options.disableBrowserBlock)
+        if (!this._options.experimental.disableBrowserBlock)
             this._detectUnsupportedBrowser();
 
         this._id = Math.random().toString(36).substr(2, 9);
         this._containerID = options.targetElement;
         this._videoID = 'anbox-stream-video-' + this._id;
         this._audioID = 'anbox-stream-audio-' + this._id;
-        this._statsID = 'anbox-stream-stats-' + this._id;
 
         // WebRTC
-        this._ws = null; // WebSocket
-        this._pc = null; // PeerConnection
-        this._controlChan = null; // Channel to send inputs
-        this._timedout = false;
-        this._timer = -1;
-        this._disconnectedTimer = -1;
-        this._ready = false;
-        this._signalingFailed = false;
-        this._sessionID = "";
-        this._allowAccessCamera = false;
-        this._allowAccessMicrophone = false;
-
-        // Media streams
-        this._videoStream = null;
-        this._audioStream = null;
-        this._audioInputStream = null;
-        this._videoInputStream = null;
+        this._webrtcManager = new AnboxWebRTCManager({
+            enableSpeakers: this._options.devices.speaker,
+            enableMic: this._options.devices.microphone,
+            enableCamera: this._options.devices.camera,
+            deviceType: this._options.deviceType,
+            foregroundActivity: this._options.foregroundActivity,
+            stats: {
+                overlayID: this._containerID,
+                enable: this._options.enableStats
+            },
+            debug: this._options.experimental.debug
+        })
+        this._webrtcManager.onReady(this._webrtcReady.bind(this))
+        this._webrtcManager.onError(this._stopStreamingOnError.bind(this))
+        this._webrtcManager.onClose(this._stopStreaming.bind(this))
+        this._webrtcManager.onStatsUpdated(this._options.callbacks.statsUpdated)
 
         // Control options
         this._modifierState = 0;
@@ -90,52 +90,9 @@ class AnboxStream {
         this._gamepadManager = null;
         this._lastTouchMoves = [];
         this._coordConverter = null;
-        this._touchEventProcessor = null;
 
-        // Stats
-        this._showStats = false;
-        this._statsTimerId = -1;
-        this._timeElapse = 0;
-        this._stats = {
-            video: {
-                bandwidthMbit: 0,
-                totalBytesReceived: 0,
-                fps: 0,
-                decodeTime: 0,
-                jitter: 0,
-                avgJitterBufferDelay: 0,
-                packetsReceived: 0,
-                packetsLost: 0
-            },
-            network: {
-                currentRtt: 0,
-                networkType: "",
-                transportType: "",
-                localCandidateType: "",
-                remoteCandidateType: ""
-            },
-            audioInput: {
-                bandwidthMbit: 0,
-                totalBytesSent: 0,
-            },
-            audioOutput: {
-                bandwidthMbit: 0,
-                totalBytesReceived: 0,
-                jitter: 0,
-                avgJitterBufferDelay: 0,
-                totalSamplesReceived: 0,
-                packetsReceived: 0,
-                packetsLost: 0
-            },
-            rtcConfig: {
-                bundlePolicy: "",
-                rtcpMuxPolicy: "",
-                sdpSemantics: "",
-                iceTransportPolicy: "",
-                iceCandidatePoolSize: ""
-            }
-        }
-
+        this._originalOrientation = null;
+        this._currentRotation = 0;
 
         this.controls = {
             touch: {
@@ -160,16 +117,6 @@ class AnboxStream {
         this._onResize = this._onResize.bind(this);
     };
 
-    _includeStunServers(stun_servers) {
-        for (var n = 0; n < stun_servers.length; n++) {
-            this._options.stunServers.push({
-                "urls": stun_servers[n].urls,
-                "username": stun_servers[n].username,
-                "credential": stun_servers[n].password
-            });
-        }
-    };
-
     /**
      * Connect a new instance for the configured application or attach to an existing one
      */
@@ -187,18 +134,12 @@ class AnboxStream {
             return
         }
 
-        this._sessionID = session.id
-
-        if (session.websocket === undefined || session.websocket.length === 0) {
-            this._stopStreamingOnError('connector did not return any signaling information');
+        try {
+            this._webrtcManager.start(session)
+        } catch (e) {
+            this._stopStreamingOnError(e);
             return
         }
-
-        // add additional stun servers if provided
-        if (session.stunServers.length > 0)
-            this._includeStunServers(session.stunServers);
-
-        this._connectSignaler(session.websocket)
     };
 
     /**
@@ -213,15 +154,66 @@ class AnboxStream {
 
     /**
      * Show overall statistics in an overlay during the streaming.
+     * For more detailed information, refer to https://www.w3.org/TR/webrtc-stats/
+     *
+     * video: Statistics on the received video track.
+     *   bandwidthMbit: Video traffic received in mbits/s.
+     *   totalBytesReceived: Total cumulated bytes received for the current session.
+     *   fps: Current frames per second.
+     *   decodeTime: Average time in seconds to decode a frame.
+     *   jitter: Total cumulated packet delay in seconds. A high jitter can mean an unstable or congested network.
+     *   avgJitterBufferDelay: Average variance in packet delay in seconds. A high jitter can mean an unstable or congested network.
+     *   packetsReceived: Total number of packets received.
+     *   packetsLost: Total number of packets lost.
+     * network: Information about the network and WebRTC connections.
+     *   currentRtt: Current round trip time in seconds.
+     *   networkType: Type of network in use. Can be one of the following:
+     *       bluetooth: This connection uses bluetooth.
+     *       celullar: The connection uses a cellular data service to connect. This includes all cellular data services including EDGE (2G), HSPA (3G), LTE (4G), and NR (5G).
+     *       ethernet: This connection uses an ethernet network.
+     *       wifi: This connection uses WiFi.
+     *       wimax: This connection uses a Wimax network.
+     *       vpn: This connection uses a VPN which obscures the underlying connection type.
+     *       unknown: The user's browser is unable or unwilling to identify the underlying connection technology used by the described connection.
+     *   transportType: Network protocol in use.
+     *   localCandidateType: Type of the local client WebRTC candidate. Can be one of the following:
+     *       host: Local client is accessible directly via IP.
+     *       srflx: Local client is accessible behind NAT.
+     *       prflx: Local client is accessible behind a symmetric NAT.
+     *       relay: Traffic is relayed to the local client via a TURN server. Relayed traffic can induce poor performance.
+     *   remoteCandidateType: Type of the remote peer (Anbox container) WebRTC candidate. Can be one of the following:
+     *       host: Remote peer is accessed directly via IP.
+     *       srflx: Remote peer is accessed behind NAT.
+     *       prflx: Remote peer is accessed behind a symmetric NAT.
+     *       relay: Traffic is relayed to the remote peer via a TURN server. Relayed traffic can induce poor performance.
+     * audioInput: Statistics related to the audio sent to the Anbox container
+     *   bandwidthMbit: Audio traffic sent in mbits/s
+     *   totalBytesSent: Total cumulated bytes sent for audio for the current session.
+     * audioOutput: Information on the received audio track.
+     *   bandwidthMbit: Audio traffic received in mbits/s.
+     *   totalBytesReceived: Total cumulated bytes received for the current session.
+     *   jitter: Total cumulated packet delay in seconds. A high jitter can mean an unstable or congested network.
+     *   avgJitterBufferDelay: Average variance in packet delay in seconds. A high jitter can mean an unstable or congested network.
+     *   totalSamplesReceived: Total number of audio samples received for the current session.
+     *   packetsReceived: Total number of packets received.
+     *   packetsLost: Total number of packets lost.
+     * rtcConfig: Information on the WebRTC connection
+     *   bundlePolicy: Policy on how to negotiate tracks if the remote peer is not bundle aware. If bundle aware, all tracks are generated on the same transport. Can be one of the following:
+     *       balanced: Gather ICE candidates for each media type in use (audio, video, and data). If the remote endpoint is not bundle-aware, negotiate only one audio and video track on separate transports.
+     *       max-compat: Gather ICE candidates for each track. If the remote endpoint is not bundle-aware, negotiate all media tracks on separate transports.
+     *       max-bundle: Gather ICE candidates for only one track. If the remote endpoint is not bundle-aware, negotiate only one media track.
+     *   rtcpMuxPolicy: Affects what ICE candidates are gathered to support non-multiplexed RTCP. The only value "require".
+     *   sdpSemantics: Describes which style of SDP offers and answers is used.
+     *   iceTransportPolicy: Policy for accepting ICE candidates. Can be one of the following:
+     *       all: Accept all candidates.
+     *       relay: Only accept candidates whose IP are being relayed, such as via a TURN server.
+     *   iceCandidatePoolSize: Size of the prefetched ICE candidate pool.
      */
     showStatistics(enabled) {
-        if (!enabled) {
-            let stats = document.getElementById(this._statsID);
-            if (stats)
-                stats.replaceChildren();
-        }
-
-        this._showStats = enabled;
+        if (enabled)
+            this._webrtcManager.showStatsOverlay()
+        else
+            this._webrtcManager.hideStatsOverlay()
     };
 
     /**
@@ -257,11 +249,14 @@ class AnboxStream {
             videoContainer.requestFullscreen().catch(err => {
                 console.log(`Failed to enter full-screen mode: ${err.message} (${err.name})`);
             });
-        } else if (videoContainer.mozRequestFullScreen) { /* Firefox */
+        } else if (videoContainer.mozRequestFullScreen) {
+            /* Firefox */
             videoContainer.mozRequestFullScreen();
-        } else if (videoContainer.webkitRequestFullscreen) { /* Chrome, Safari and Opera */
+        } else if (videoContainer.webkitRequestFullscreen) {
+            /* Chrome, Safari and Opera */
             videoContainer.webkitRequestFullscreen();
-        } else if (videoContainer.msRequestFullscreen) { /* IE/Edge */
+        } else if (videoContainer.msRequestFullscreen) {
+            /* IE/Edge */
             videoContainer.msRequestFullscreen();
         }
     };
@@ -275,6 +270,9 @@ class AnboxStream {
 
     /**
      * Return the stream ID you can use to access video and audio elements with getElementById
+     * To access the video element, append "anbox-stream-video-" to the ID.
+     * To access the audio element, append "anbox-stream-audio-" to the ID.
+     * Ex: 'anbox-stream-video-rk8a12k'
      */
     getId() {
         return this._id;
@@ -300,6 +298,9 @@ class AnboxStream {
      * @param update.altitude {number} Altitude in meters
      * @param update.speed {number} Current speed in meter per second
      * @param update.bearing {number} Current bearing in degree
+     * @throws {Error} Incomplete location update, some fields are missing.
+     * @throws {Error} Invalid GPS data format, can only be "wgs84" or "nmea".
+     * @throws {Error} The stream SDK is not ready yet.
      */
     sendLocationUpdate(update) {
         if (this._nullOrUndef(update.time) ||
@@ -317,24 +318,13 @@ class AnboxStream {
             throw new Error("invalid gps data format")
         }
 
-        this._sendControlMessage("location::update-position", update);
-    }
-
-    _connectSignaler(url) {
-        let ws = new WebSocket(url);
-        ws.onopen = this._onWsOpen.bind(this);
-        ws.onclose = this._onWsClose.bind(this);
-        ws.onerror = this._onWsError.bind(this);
-        ws.onmessage = this._onWsMessage.bind(this);
-
-        this._ws = ws;
-        this._timer = window.setTimeout(this._onSignalerTimeout.bind(this), 5 * 60 * 1000);
+        this._webrtcManager.sendControlMessage("location::update-position", update);
     }
 
     _detectUnsupportedBrowser() {
         if (navigator.userAgent.indexOf("Chrome") === -1 &&
-          navigator.userAgent.indexOf("Firefox") === -1 &&
-          navigator.userAgent.indexOf("Safari") === -1)
+            navigator.userAgent.indexOf("Firefox") === -1 &&
+            navigator.userAgent.indexOf("Safari") === -1)
             throw new Error("unsupported browser");
     };
 
@@ -385,10 +375,10 @@ class AnboxStream {
             options.callbacks.messageReceived = () => {};
 
         if (this._nullOrUndef(options.callbacks.requestCameraAccess))
-            options.callbacks.requestCameraAccess = () => { return false };
+            options.callbacks.requestCameraAccess = () => false
 
         if (this._nullOrUndef(options.callbacks.requestMicrophoneAccess))
-            options.callbacks.requestMicrophoneAccess = () => { return false };
+            options.callbacks.requestMicrophoneAccess = () => false
 
         if (this._nullOrUndef(options.disableBrowserBlock))
             options.disableBrowserBlock = false;
@@ -396,8 +386,20 @@ class AnboxStream {
         if (this._nullOrUndef(options.foregroundActivity))
             options.foregroundActivity = "";
 
-        if (this._nullOrUndef(options.showStatistics))
-            options.showStatistics = false;
+        if (this._nullOrUndef(options.deviceType))
+            options.deviceType = '';
+
+        if (this._nullOrUndef(options.enableStats))
+            options.enableStats = false;
+
+        if (this._nullOrUndef(options.experimental))
+            options.experimental = {};
+
+        if (this._nullOrUndef(options.experimental.disableBrowserBlock))
+            options.experimental.disableBrowserBlock = false;
+
+        if (this._nullOrUndef(options.experimental.debug))
+            options.experimental.debug = false;
     };
 
     _validateOptions(options) {
@@ -415,34 +417,23 @@ class AnboxStream {
         if (typeof(options.connector.disconnect) !== "function")
             throw new Error('missing "disconnect" method on connector');
 
-        if (options.foregroundActivity.length > 0 &&
-            !_activityNamePattern.test(options.foregroundActivity))
+        const _activityNamePattern = /(^([A-Za-z]{1}[A-Za-z\d_]*\.){2,}|^(\.){1})[A-Za-z][A-Za-z\d_]*$/
+        if (options.foregroundActivity.length > 0 && !_activityNamePattern.test(options.foregroundActivity))
             throw new Error('invalid foreground activity name');
     }
 
     _createMedia() {
         let mediaContainer = document.getElementById(this._containerID);
-
-        const stats = document.createElement('div');
-        stats.id = this._statsID;
-        stats.style.position = "absolute";
-        stats.style.left = "0px";
-        stats.style.top = "0px";
-        stats.style.width = "250px";
-        stats.style.backgroundColor = "rgba(0,0,0,0.75)";
-        stats.style.color = "white";
-        stats.style.fontSize = "x-small";
-        stats.style.borderRadius = "3px";
-        stats.style.lineHeight = "20px";
-        stats.style.whiteSpace = "pre";
-        // Ignore the pointer interaction on stats overlay
-        stats.style.pointerEvents = "none";
-        mediaContainer.appendChild(stats);
+        // We set the container as relative so the video element is absolute to it and not something else
+        mediaContainer.style.position = 'relative';
 
         const video = document.createElement('video');
         video.style.margin = "0";
         video.style.height = "auto";
         video.style.width = "auto";
+        // The video element is sized based on the dimensions of its container. Settings its position to "absolute"
+        // removes it from the flow, so the video element cannot change its parent dimensions.
+        video.style.position = 'absolute';
         video.muted = true;
         video.autoplay = true;
         video.controls = false;
@@ -463,9 +454,7 @@ class AnboxStream {
         }
     };
 
-    _insertMediaSource(videoSource, audioSource) {
-        this._ready = true;
-
+    _webrtcReady(videoSource, audioSource) {
         const video = document.getElementById(this._videoID);
         video.srcObject = videoSource;
 
@@ -473,49 +462,23 @@ class AnboxStream {
             const audio = document.getElementById(this._audioID);
             audio.srcObject = audioSource;
         }
+
+        this._options.callbacks.ready()
     };
 
     _removeMedia() {
         const video = document.getElementById(this._videoID);
         const audio = document.getElementById(this._audioID);
-        const stats = document.getElementById(this._statsID);
 
         if (video)
             video.remove();
         if (audio)
             audio.remove();
-        if (stats)
-            stats.remove();
     };
 
     _stopStreaming() {
-        // Notify the other side that we're disconnecting to speed up potential reconnects
-        this._sendControlMessage("stream::disconnect", {});
-
-        if (this._disconnectedTimer > 0) {
-            window.clearTimeout(this._disconnectedTimer);
-            this._disconnectedTimer = -1;
-        }
-
-        if (this._audioInputStream)
-            this._audioInputStream.getTracks().forEach(track => track.stop());
-
-        if (this._videoInputStream)
-            this._videoInputStream.getTracks().forEach(track => track.stop());
-
-        if (this._pc !== null) {
-            this._pc.close();
-            this._pc = null;
-        }
-        if (this._ws !== null) {
-            this._ws.close();
-            this._ws = null;
-        }
         this._unregisterControls();
         this._removeMedia();
-
-        if (this._statsTimerId !== -1)
-            window.clearInterval(this._statsTimerId)
 
         if (this._gamepadManager) {
             this._gamepadManager.stopPolling()
@@ -523,342 +486,73 @@ class AnboxStream {
         this._options.callbacks.done()
     };
 
-    _onSignalerTimeout() {
-        if (this._pc == null || this._pc.iceConnectionState === 'connected')
-            return;
-
-        this._timedout = true;
-        this._stopStreaming();
-    };
-
-    _onRtcOfferCreated(description) {
-        this._pc.setLocalDescription(description);
-        let msg = {type: 'offer', sdp: btoa(description.sdp)};
-        if (this._ws.readyState === 1)
-            this._ws.send(JSON.stringify(msg));
-    };
-
-    _onRtcTrack(event) {
-        const kind = event.track.kind;
-        if (kind === 'video') {
-            this._videoStream = event.streams[0];
-            this._videoStream.onremovetrack = this._stopStreaming;
-        } else if (kind === 'audio') {
-            this._audioStream = event.streams[0];
-            this._audioStream.onremovetrack = this._stopStreaming;
-        }
-
-        // Start streaming until audio and video tracks both are available
-        if (this._videoStream && (!this._options.devices.speaker || this._audioStream)) {
-            this._insertMediaSource(this._videoStream, this._audioStream);
-            this._startStatsUpdater();
-            this._options.callbacks.ready(this._sessionID);
-        }
-    };
-
-    _refreshStatistics() {
-        let stats = document.getElementById(this._statsID);
-
-        stats.replaceChildren();
-        const insertHeader = (title) => {
-            let textNode = document.createTextNode(`${title}`);
-            stats.appendChild(textNode);
-
-            let lineBreak = document.createElement("br");
-            stats.appendChild(lineBreak);
-        };
-
-        const insertStat = (type, value) => {
-            let textNode = document.createTextNode(`    ${type}: ${value}`);
-            stats.appendChild(textNode);
-
-            let lineBreak = document.createElement("br");
-            stats.appendChild(lineBreak);
-        };
-
-        const mbits_format = (v) => {
-            return (v * 8 / 1000 / 1000).toFixed(2) + " Mbit/s"
-        }
-
-        const mb_format = (v) => {
-            return (v / 1000 / 1000).toFixed(2) + " MB"
-        }
-
-        const ms_format = (v) => {
-            return (v * 1000).toFixed(2) + " ms"
-        }
-
-        insertHeader("RTC Configuration")
-        if (this._stats.rtcConfig.sdpSemantics !== "")
-          insertStat("sdpSemantics", this._stats.rtcConfig.sdpSemantics)
-        if (this._stats.rtcConfig.rtcpMuxPolicy !== "")
-          insertStat("rtcpMuxPolicy", this._stats.rtcConfig.rtcpMuxPolicy)
-        if (this._stats.rtcConfig.bundlePolicy !== "")
-          insertStat("bundlePolicy", this._stats.rtcConfig.bundlePolicy)
-        if (this._stats.rtcConfig.iceTransportPolicy !== "")
-          insertStat("iceTransportPolicy", this._stats.rtcConfig.iceTransportPolicy)
-        if (this._stats.rtcConfig.iceCandidatePoolSize !== "")
-          insertStat("iceCandidatePoolSize", this._stats.rtcConfig.iceCandidatePoolSize)
-
-        insertHeader("Network")
-        insertStat("currentRtt", ms_format(this._stats.network.currentRtt))
-        insertStat("networkType", this._stats.network.networkType)
-        insertStat("transportType", this._stats.network.transportType)
-        insertStat("localCandidateType", this._stats.network.localCandidateType)
-        insertStat("remoteCandidateType", this._stats.network.remoteCandidateType)
-
-        insertHeader("Video")
-        insertStat("bandWidth", mbits_format(this._stats.video.bandwidthMbit))
-        insertStat("totalBytesReceived", mb_format(this._stats.video.totalBytesReceived))
-        insertStat("fps", this._stats.video.fps)
-        insertStat("decodeTime", ms_format(this._stats.video.decodeTime))
-        insertStat("jitter", ms_format(this._stats.video.jitter))
-        insertStat("avgJitterBufferDelay", ms_format(this._stats.video.avgJitterBufferDelay))
-        insertStat("packetsReceived", this._stats.video.packetsReceived)
-        insertStat("packetsLost", this._stats.video.packetsLost)
-
-        insertHeader("Audio Output")
-        insertStat("bandWidth", mbits_format(this._stats.audioOutput.bandwidthMbit))
-        insertStat("totalBytesReceived", mb_format(this._stats.audioOutput.totalBytesReceived))
-        insertStat("totalSamplesReceived", this._stats.audioOutput.totalSamplesReceived)
-        insertStat("jitter", ms_format(this._stats.audioOutput.jitter))
-        insertStat("avgJitterBufferDelay", ms_format(this._stats.audioOutput.avgJitterBufferDelay))
-        insertStat("packetsReceived", this._stats.audioOutput.packetsReceived)
-        insertStat("packetsLost", this._stats.audioOutput.packetsLost)
-    }
-
-    _startStatsUpdater() {
-        if (this._nullOrUndef(this._options.callbacks.statsUpdated))
-            return
-
-        let pc_conf = this._pc.getConfiguration();
-        if (pc_conf) {
-          if ("sdpSemantics" in pc_conf)
-              this._stats.rtcConfig.sdpSemantics = pc_conf.sdpSemantics
-
-          if ("rtcpMuxPolicy" in pc_conf)
-              this._stats.rtcConfig.rtcpMuxPolicy = pc_conf.rtcpMuxPolicy
-
-          if ("bundlePolicy" in pc_conf)
-              this._stats.rtcConfig.bundlePolicy = pc_conf.bundlePolicy
-
-          if ("iceTransportPolicy" in pc_conf)
-              this._stats.rtcConfig.iceTransportPolicy = pc_conf.iceTransportPolicy
-
-          if ("iceCandidatePoolSize" in pc_conf)
-              this._stats.rtcConfig.iceCandidatePoolSize = pc_conf.iceCandidatePoolSize
-        }
-
-        this._statsTimerId = window.setInterval(() => {
-            if (this._nullOrUndef(this._pc))
-                return
-
-            this._timeElapse++
-            this._pc.getStats(null).then(stats => {
-                stats.forEach(report => {
-                    // Instead of dumping all the statistics, we only provide
-                    // limited sets of stats to the caller.
-                    Object.keys(report).forEach(statName => {
-                        if (statName === "ssrc") {
-                            if ("mediaType" in report) {
-                                let mediaType = report["mediaType"];
-                                if (mediaType === "video") {
-                                    if ("bytesReceived" in report) {
-                                        let bytesReceived = report["bytesReceived"]
-                                        let diff = 0;
-                                        if (this._stats.video.totalBytesReceived > bytesReceived)
-                                            diff = bytesReceived;
-                                        else
-                                            diff = bytesReceived - this._stats.video.totalBytesReceived;
-
-                                        this._stats.video.bandwidthMbit = diff;
-                                        this._stats.video.totalBytesReceived = bytesReceived;
-                                    }
-                                } else if (mediaType === "audio") {
-                                    if ("packetsSent" in report) {
-                                        if ("bytesSent" in report) {
-                                            let bytesSent = report["bytesSent"];
-                                            let diff = 0;
-                                            if (this._stats.audioInput.bytesSent > bytesSent)
-                                                diff = bytesSent;
-                                            else
-                                                diff = bytesSent - this._stats.audioInput.bytesSent;
-
-                                            this._stats.audioInput.bandwidthMbit = diff;
-                                            this._stats.audioInput.totalBytesSent = bytesSent;
-                                        }
-                                    } else {
-                                        if ("bytesReceived" in report) {
-                                            let bytesReceived = report["bytesReceived"];
-                                            let diff = 0;
-                                            if (this._stats.audioOutput.totalBytesReceived > bytesReceived)
-                                                diff = bytesReceived;
-                                            else
-                                                diff = bytesReceived - this._stats.audioOutput.totalBytesReceived;
-
-                                            this._stats.audioOutput.bandwidthMbit = diff;
-                                            this._stats.audioOutput.totalBytesReceived = bytesReceived;
-                                        }
-                                    }
-                                }
-                            }
-                        } else if (statName === "type" && report["type"] === "candidate-pair") {
-                            if ("nominated" in report && report["nominated"] &&
-                                "state" in report && report["state"] === "succeeded" &&
-                                "currentRoundTripTime" in report) {
-                                this._stats.network.currentRtt = report["currentRoundTripTime"];
-                           }
-                           let network = this._stats.network
-                           if (network.networkType === "" ||
-                               network.transportType === "" ||
-                               network.localCandidateType === "" ||
-                               network.remoteCandidateType === "") {
-                               if (report["nominated"] && report["state"] === "succeeded") {
-                                   var localCandidateId = report["localCandidateId"];
-                                   var remoteCandidateId = report["remoteCandidateId"];
-                                   stats.forEach(stat => {
-                                       if (stat.id === localCandidateId) {
-                                           this._stats.network.localCandidateType = stat.candidateType
-                                           this._stats.network.networkType = stat.networkType
-                                       }
-                                       if (stat.id === remoteCandidateId) {
-                                           this._stats.network.remoteCandidateType = stat.candidateType
-                                           this._stats.network.transportType = stat.protocol
-                                       }
-                                   })
-                               }
-                           }
-                        } else if (statName === "type" && report["type"] === "inbound-rtp") {
-                            if (report["kind"] === "video") {
-                                 if ("framesDecoded" in report)
-                                      this._stats.video.fps = Math.round(report["framesDecoded"] / this._timeElapse);
-                                 if ("totalDecodeTime" in report && "framesDecoded" in report && report["framesDecoded"] !== 0)
-                                      this._stats.video.decodeTime = report["totalDecodeTime"] / report["framesDecoded"];
-                                 if ("packetsLost" in report)
-                                      this._stats.video.packetsLost = report["packetsLost"]
-                                 if ("packetsReceived" in report)
-                                      this._stats.video.packetsReceived = report["packetsReceived"]
-                                 if ("jitter" in report)
-                                      this._stats.video.jitter = report["jitter"]
-                                 if ("jitterBufferDelay" in report && "jitterBufferEmittedCount" in report && report["jitterBufferEmittedCount"] !== 0)
-                                      this._stats.video.avgJitterBufferDelay = report["jitterBufferDelay"] / report["jitterBufferEmittedCount"]
-                            } else if (report["kind"] === "audio") {
-                                 if ("totalSamplesReceived" in report)
-                                      this._stats.audioOutput.totalSamplesReceived = report["totalSamplesReceived"]
-                                 if ("packetsLost" in report)
-                                      this._stats.audioOutput.packetsLost = report["packetsLost"]
-                                 if ("packetsReceived" in report)
-                                      this._stats.audioOutput.packetsReceived = report["packetsReceived"]
-                                 if ("jitter" in report)
-                                      this._stats.audioOutput.jitter = report["jitter"]
-                                 if ("jitterBufferDelay" in report && "jitterBufferEmittedCount" in report && report["jitterBufferEmittedCount"] !== 0)
-                                      this._stats.audioOutput.avgJitterBufferDelay = report["jitterBufferDelay"] / report["jitterBufferEmittedCount"]
-                            }
-                        }
-                    });
-                });
-            });
-
-            if (this._showStats)
-                this._refreshStatistics()
-
-            this._options.callbacks.statsUpdated(this._stats);
-        },
-        // TODO: enable stats update interval configurable
-        1000);
-    }
-
-    _onConnectionTimeout() {
-        this._disconnectedTimer = -1;
-        this._stopStreamingOnError('lost WebRTC connection');
-    }
-
-    _onRtcIceConnectionStateChange() {
-        if (this._pc === null)
-            return;
-
-        if (this._pc.iceConnectionState === 'failed') {
-            this._stopStreamingOnError('failed to establish a WebRTC connection via ICE');
-        } else if (this._pc.iceConnectionState === 'disconnected') {
-            // When we end up here the connection may not have closed but we
-            // just have a temorary network problem. We wait for a moment and
-            // if the connection isn't restablished we stop streaming
-            this._disconnectedTimer = window.setTimeout(this._onConnectionTimeout.bind(this), 10 * 1000);
-        } else if (this._pc.iceConnectionState === 'closed') {
-            if (this._timedout) {
-                this._stopStreamingOnError('timed out to establish a WebRTC connection as signaler did not respond');
-                return;
-            }
-            this._stopStreaming();
-        } else if (this._pc.iceConnectionState === 'connected') {
-            if (this._disconnectedTimer > 0) {
-                window.clearTimeout(this._disconnectedTimer);
-                this._disconnectedTimer = -1;
-            }
-            window.clearTimeout(this._timer);
-            this._ws.close();
-        }
-    };
-
-    _onRtcIceCandidate(event) {
-        if (event.candidate !== null && event.candidate.candidate !== "") {
-            const msg = {
-                type: 'candidate',
-                candidate: btoa(event.candidate.candidate),
-                sdpMid: event.candidate.sdpMid,
-                sdpMLineIndex: event.candidate.sdpMLineIndex,
-            };
-            if (this._ws.readyState === 1)
-                this._ws.send(JSON.stringify(msg));
-        }
-    };
-
     _registerControls() {
         window.addEventListener('resize', this._onResize)
 
-        const v = document.getElementById(this._videoID)
+        const container = document.getElementById(this._containerID)
         this._coordConverter = new _coordinateConverter()
-        this._touchEventProcessor = new TouchEventProcessor(v)
+
+        // NOTE: `navigator.maxTouchPoints` is undefined for iOS 12 and below,
+        //       in this case, we only support two touch points at most, which
+        //       would enable people to perform basic multi touch operations.
+        //       like pinch to zoom.
+        this._maxTouchPoints = navigator.maxTouchPoints || 2;
 
         if (this._options.controls.mouse) {
-            const video = document.getElementById(this._videoID);
-            if (video) {
+            if (container) {
                 for (const controlName in this.controls.touch)
-                    video.addEventListener(controlName, this.controls.touch[controlName]);
+                    container.addEventListener(controlName, this.controls.touch[controlName]);
             }
         }
 
         this.captureKeyboard()
     };
 
-
+    /**
+     * Start the capture of keyboard events and send them to the Android container.
+     * NOTE: While keyboard events are captured, you cannot use keyboard controls outside the SDK stream.
+     * To re-enable keyboard events, see releaseKeyboard().
+     * @throws {Error} Throw if keyboard controls are disabled
+     */
     captureKeyboard() {
-        if (this._options.controls.keyboard) {
-            for (const controlName in this.controls.keyboard)
-                window.addEventListener(controlName, this.controls.keyboard[controlName]);
-        }
+        if (!this._options.controls.keyboard)
+            throw new Error('keyboard controls are disabled')
+
+        for (const controlName in this.controls.keyboard)
+            window.addEventListener(controlName, this.controls.keyboard[controlName]);
     }
 
+    /**
+     * Stops capturing keyboard events. Can be used when you want to use a keyboard while a stream is running.
+     * @throws {Error} Throw if keyboard controls are disabled
+     */
     releaseKeyboard() {
-        if (this._options.controls.keyboard) {
-            for (const controlName in this.controls.keyboard)
-                window.removeEventListener(controlName, this.controls.keyboard[controlName]);
-        }
+        if (!this._options.controls.keyboard)
+            throw new Error('keyboard controls are disabled')
+
+        for (const controlName in this.controls.keyboard)
+            window.removeEventListener(controlName, this.controls.keyboard[controlName]);
     }
 
     sendIMECommittedText(text) {
-        const data = {text: text}
+        const data = {
+            text: text
+        }
         this._sendIMEMessage(_imeEventType.Text, data)
     };
 
     sendIMEComposingText(text) {
-        const data = {text: text}
+        const data = {
+            text: text
+        }
         this._sendIMEMessage(_imeEventType.ComposingText, data)
     };
 
     sendIMETextDeletion(counts) {
         if (counts <= 0)
             return;
+
+        const _android_KEYCODE_DEL = 67
         this._sendIMECode(_android_KEYCODE_DEL, counts);
     };
 
@@ -870,17 +564,23 @@ class AnboxStream {
         // from client side rather server, we have to remove the focus
         // from the video container so that the client side virtual
         // keyboard will pop down afterwards.
-        if (name == "hide")
-           this._setVideoContainerFocused(false);
+        if (name === "hide")
+            this._setVideoContainerFocused(false);
 
-        const data = {name: name, params: params}
+        const data = {
+            name: name,
+            params: params
+        }
         this._sendIMEMessage(_imeEventType.Action, data);
     };
 
     sendIMEComposingRegion(start, end) {
         if (start < 0 || start > end)
             return;
-        const data = {start: start, end: end}
+        const data = {
+            start: start,
+            end: end
+        }
         this._sendIMEMessage(_imeEventType.ComposingRegion, data);
     }
 
@@ -900,6 +600,66 @@ class AnboxStream {
         this.releaseKeyboard();
     };
 
+    /**
+     * Calculate how many degrees we should rotate to go from the original orientation to the desired one
+     */
+    _orientationToDegrees(startingOrientation, desiredOrientation) {
+        const orientations = [
+            'portrait',
+            'landscape',
+            'reverse-portrait',
+            'reverse-landscape'
+        ]
+        const currentPos = orientations.indexOf(startingOrientation)
+        const desiredPos = orientations.indexOf(desiredOrientation)
+        if (currentPos === -1 || desiredPos === -1)
+            throw new Error("invalid orientation given")
+        let requiredTurns = desiredPos - currentPos
+        return (requiredTurns * 90) - 360 * Math.floor(requiredTurns/360)
+    }
+
+    /**
+     * rotate the video element to a given orientation
+     * @param orientation {string} Desired orientation. Can be 'portrait', 'landscape', 'reverse-portrait', 'reverse-landscape'
+     *                             No-op if already in the given orientation
+     * @throws {Error} Invalid orientation given
+     * @throws {Error} SDK is not ready yet
+     */
+    rotate(orientation) {
+        switch (orientation) {
+            case 'portrait':
+            case 'landscape':
+            case 'reverse-portrait':
+            case 'reverse-landscape':
+                break
+            default:
+                throw new Error("invalid orientation given")
+        }
+
+        const dim = this._dimensions
+        if (!dim)
+            throw new Error('SDK not ready')
+
+        if (orientation === this._currentOrientation) {
+            console.log('video element already in requested orientation', orientation)
+            return;
+        }
+
+        this._webrtcManager.sendControlMessage("screen::change_orientation", {
+            orientation: orientation
+        })
+
+        this._currentOrientation = orientation
+        this._currentRotation = this._orientationToDegrees(this._originalOrientation, orientation)
+
+        document.getElementById(this._videoID).style.transform = `rotate(${this._currentRotation}deg)`
+        this._onResize()
+    }
+
+    getCurrentOrientation() {
+        return this._currentOrientation
+    }
+
     _onResize() {
         const video = document.getElementById(this._videoID)
         const container = document.getElementById(this._containerID)
@@ -907,37 +667,73 @@ class AnboxStream {
             return;
 
         // We calculate the distance to the closest window border while keeping aspect ratio intact.
-        const videoHeight = video.clientHeight
-        const videoWidth = video.clientWidth
-        const containerHeight = container.clientHeight
-        const containerWidth = container.clientWidth
+        let videoHeight = video.videoHeight
+        let videoWidth = video.videoWidth
 
-        // Depending on the aspect ratio, one size will grow faster than the other
-        const widthGrowthAcceleration = Math.max(video.videoWidth / video.videoHeight, 1)
-        const heightGrowthAcceleration = Math.max(video.videoHeight / video.videoWidth, 1)
+        const style = window.getComputedStyle(container, null)
+        const getPadding = (direction) => parseFloat(style.getPropertyValue('padding-' + direction) || '0')
+        const containerHeight = container.clientHeight - getPadding('top') - getPadding('bottom')
+        const containerWidth = container.clientWidth - getPadding('left') - getPadding('right')
 
-        // So we apply that acceleration to find the shortest stretch
-        const widthFinalStretch = Math.round((containerWidth - videoWidth) * heightGrowthAcceleration)
-        const heightFinalStretch = Math.round((containerHeight - videoHeight) * widthGrowthAcceleration)
-
-        if (widthFinalStretch < heightFinalStretch) {
-            video.style.width = containerWidth.toString() + "px"
-            video.style.height = "100%"
-        } else {
-            video.style.height = containerHeight.toString() + "px"
-            video.style.width = "100%"
+        // Handle rotation
+        switch (this._currentRotation) {
+            case 0:
+            case 180:
+                break
+            case 90:
+            case 270:
+                videoHeight = video.videoWidth
+                videoWidth = video.videoHeight
+                break
+            default:
+                throw new Error('unhandled rotation')
         }
-        // _refreshWindowMath relies on the video having the final dimensions.
-        // We MUST do it after the video dimensions have been calculated.
-        this._refreshWindowMath()
 
-        // Video elements cannot contain elements inside hence adjust overlay
-        // and align stats overlay to on the left edge of video element after resizing
-        const stats = document.getElementById(this._statsID)
-        if (stats) {
-            const statsMargin = 15
-            stats.style.left = (this._dimensions.containerOffsetX + statsMargin).toString() + "px"
-            stats.style.top = (this._dimensions.containerOffsetY + statsMargin).toString() + "px"
+        // By what percentage do we have to grow/shrink the video so it has the same size as its container
+        const resizePercentage = Math.min(containerHeight / videoHeight, containerWidth / videoWidth)
+        const playerHeight = Math.round(videoHeight * resizePercentage);
+        const playerWidth = Math.round(videoWidth * resizePercentage);
+
+        switch (this._currentRotation) {
+            case 0:
+            case 180:
+                video.style.height = playerHeight.toString() + "px";
+                video.style.width = playerWidth.toString() + "px";
+                video.style.top = `${Math.round(container.clientHeight / 2 - playerHeight / 2)}px`;
+                video.style.left = `${Math.round(container.clientWidth / 2 - playerWidth / 2)}px`;
+                break
+            case 270:
+            case 90:
+                video.style.height = playerWidth.toString() + "px";
+                video.style.width = playerHeight.toString() + "px";
+                video.style.top = `${Math.round(container.clientHeight / 2 - playerWidth / 2)}px`;
+                video.style.left = `${Math.round(container.clientWidth / 2 - playerHeight / 2)}px`;
+                break
+            default:
+                throw new Error('unhandled rotation')
+        }
+
+        // Initialize basic orientation
+        if (this._originalOrientation === null) {
+            if (playerWidth > playerHeight)
+                this._originalOrientation = 'landscape'
+            else
+                this._originalOrientation = 'portrait'
+            this._currentOrientation = this._originalOrientation
+        }
+
+        // The visual offset is always derived from the same formula, no matter the orientation.
+        const offsetTop = Math.round(container.clientHeight / 2 - playerHeight / 2);// + getPadding('top')
+        const offsetLeft = Math.round(container.clientWidth / 2 - playerWidth / 2);// + getPadding('left')
+
+        this._dimensions = {
+            videoHeight: videoHeight,
+            videoWidth: videoWidth,
+            scalePercentage: resizePercentage,
+            playerHeight: playerHeight,
+            playerWidth: playerWidth,
+            playerOffsetLeft: offsetLeft,
+            playerOffsetTop: offsetTop
         }
     }
 
@@ -945,70 +741,68 @@ class AnboxStream {
         if (event.getModifierState(key)) {
             if (!(this._modifierState & _modifierEnum[key])) {
                 this._modifierState = this._modifierState | _modifierEnum[key];
-                this._sendInputEvent('key', {code: _keyScancodes[key], pressed: true});
+                this._sendInputEvent('key', {
+                    code: _keyScancodes[key],
+                    pressed: true
+                });
             }
         } else {
             if ((this._modifierState & _modifierEnum[key])) {
                 this._modifierState = this._modifierState & ~_modifierEnum[key];
-                this._sendInputEvent('key', {code: _keyScancodes[key], pressed: false});
+                this._sendInputEvent('key', {
+                    code: _keyScancodes[key],
+                    pressed: false
+                });
             }
         }
     };
 
     _sendInputEvent(type, data) {
-        this._sendControlMessage('input::' + type, data);
+        this._webrtcManager.sendControlMessage('input::' + type, data);
     }
 
-    _sendControlMessage(type, data) {
-        if (this._pc === null || this._controlChan.readyState !== 'open')
-            return;
-        this._controlChan.send(JSON.stringify({type: type, data: data}));
-    };
-
-   _sendIMECode(code, times) {
-        const data = {code: code, times: times}
+    _sendIMECode(code, times) {
+        const data = {
+            code: code,
+            times: times
+        }
         this._sendIMEMessage(_imeEventType.Keycode, data)
-   }
+    }
 
     _sendIMEMessage(imeEventType, imeData) {
-        if (this._pc === null || this._controlChan.readyState !== 'open')
-            return;
-        const data = {type: imeEventType, data: imeData}
-        this._controlChan.send(JSON.stringify({type: 'input::ime-event', data: data}));
-    };
-
-    _refreshWindowMath() {
-        let video = document.getElementById(this._videoID);
-
-        // timing issues can occur when removing the component
-        if (!video) {
-            return
+        const data = {
+            type: imeEventType,
+            data: imeData
         }
-
-        const windowW = video.offsetWidth;
-        const windowH = video.offsetHeight;
-        const frameW = video.videoWidth;
-        const frameH = video.videoHeight;
-
-        const multi = Math.min(windowW / frameW, windowH / frameH);
-        const vpWidth = frameW * multi;
-        const vpHeight = frameH * multi;
-
-        this._dimensions = {
-            scalingFactorX: frameW / vpWidth,
-            scalingFactorY: frameH / vpHeight,
-            containerOffsetX: Math.max((windowW - vpWidth) / 2.0, 0),
-            containerOffsetY: Math.max((windowH - vpHeight) / 2.0, 0),
-            frameW,
-            frameH,
-        };
+        this._webrtcManager.sendControlMessage('input::ime-event', data)
     };
 
     _onMouseMove(event) {
-        const pos = this._coordConverter.convert(
-          {x: event.offsetX, y: event.offsetY}, this._dimensions)
-        this._sendInputEvent('mouse-move', {x: pos.x, y: pos.y,
-          rx: event.movementX, ry: event.movementY});
+        // Mouse events are relative to the outer container. We have to translate them to the dimensions of
+        // the video element
+        const dim = this._dimensions
+        if (!dim)
+            throw new Error('SDK not ready')
+
+        const container = document.getElementById(this._containerID)
+
+        const cRect = container.getBoundingClientRect();
+        let x = event.clientX - cRect.left - dim.playerOffsetLeft;
+        let y = event.clientY - cRect.top - dim.playerOffsetTop;
+
+        // Ignore events outside the video element
+        if (x < 0 || x > dim.playerWidth ||
+            y < 0 || y > dim.playerHeight) {
+            return
+        }
+
+        const pos = this._coordConverter.convert(x, y, this._dimensions)
+        this._sendInputEvent('mouse-move', {
+            x: pos.x,
+            y: pos.y,
+            rx: event.movementX / this._dimensions.scalePercentage,
+            ry: event.movementY / this._dimensions.scalePercentage
+        });
     };
 
     _onMouseButton(event) {
@@ -1019,15 +813,27 @@ class AnboxStream {
             return;
 
         switch (event.button) {
-            case 0: button = 1; break;
-            case 1: button = 2; break;
-            case 2: button = 3; break;
-            case 3: button = 4; break;
-            case 4: button = 5; break;
-            default: break;
+            case 0: // no button
+                button = 1;
+                break;
+            case 1: // primary button (left click)
+                button = 2;
+                break;
+            case 2: // secondary button (right click)
+                button = 3;
+                break;
+            case 4: // auxiliary button (middle click usually)
+                button = 5;
+                break;
+            default:
+                console.error('Unknown mouse button', event.button)
+                return;
         }
 
-        this._sendInputEvent('mouse-button', {button: button, pressed: down});
+        this._sendInputEvent('mouse-button', {
+            button: button,
+            pressed: down
+        });
     };
 
     _onMouseWheel(event) {
@@ -1039,7 +845,10 @@ class AnboxStream {
         const movex = move_step(event.deltaX)
         const movey = move_step(event.deltaY)
         if (movex !== 0 || movey !== 0)
-            this._sendInputEvent('mouse-wheel', {x: movex, y: movey});
+            this._sendInputEvent('mouse-wheel', {
+                x: movex,
+                y: movey
+            });
     };
 
     _onKey(event) {
@@ -1066,13 +875,16 @@ class AnboxStream {
                 this._triggerModifierEvent(event, modifierKeys[i]);
             }
 
-            this._sendInputEvent('key', {code: code, pressed: pressed});
+            this._sendInputEvent('key', {
+                code: code,
+                pressed: pressed
+            });
         } else if (event.code.startsWith(numpad_key_prefix)) {
             // 1. Use the event.key over event.code for the key code if a key event(digit only) triggered
             // from NumPad when NumLock is detected off The reason here is that event.code always remains
             // the same no matter NumLock is detected on or off. Also Anbox doesn't respect these keycodes
             // since Anbox just propagates those keycodes from client to the container and there is no
-            // corresponding input event codes mapping all key codes comming from NumPad.
+            // corresponding input event codes mapping all key codes coming from NumPad.
             //
             // See: https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
             //
@@ -1091,7 +903,10 @@ class AnboxStream {
                     event_code = "Digit" + event_code
                 else
                     event_code = event.key
-                this._sendInputEvent('key', {code: _keyScancodes[event_code], pressed: pressed});
+                this._sendInputEvent('key', {
+                    code: _keyScancodes[event_code],
+                    pressed: pressed
+                });
             } else {
                 let attach_shift = false
                 if (event_code in _numPadMapper) {
@@ -1100,17 +915,78 @@ class AnboxStream {
                     event_code = _numPadMapper[event_code]
                 }
                 if (attach_shift)
-                    this._sendInputEvent('key', {code: _keyScancodes["Shift"], pressed: pressed});
-                this._sendInputEvent('key', {code: _keyScancodes[event_code], pressed: pressed});
+                    this._sendInputEvent('key', {
+                        code: _keyScancodes["Shift"],
+                        pressed: pressed
+                    });
+                this._sendInputEvent('key', {
+                    code: _keyScancodes[event_code],
+                    pressed: pressed
+                });
             }
         }
     };
 
     _touchEvent(event, eventType) {
         event.preventDefault();
+        const container = document.getElementById(this._containerID)
+        if (container === null)
+            throw new Error('invalid container')
+
         for (let n = 0; n < event.changedTouches.length; n++) {
-            const e = this._touchEventProcessor.process(
-              event.changedTouches, n, this._dimensions)
+            const touch = event.changedTouches[n]
+
+            let id = touch.identifier;
+            // FIXME: On iOS(Safari), unlike Chrome, each touch event has a fixed identifier (e.g 0, 1)
+            // to differentiate touch point when multiple touch events are processed at the same time,
+            // the touch.identifier on iOS is a unique natural number increase/decrease progressively,
+            // so it can be a negative/positive number/zero. However the input event to be sent to Android
+            // that bind with the id is ABS_MT_SLOT, which the minimum value of the ABS_MT_SLOT axis must
+            // be 0. In this case, we use the index instead, which could mess up touch sequence a bit
+            // on multi touches, but fix the broken touch input system.
+            if (id < 0 || id > this._maxTouchPoints - 1)
+                id = n
+
+            const dim = this._dimensions
+
+            const cRect = container.getBoundingClientRect();
+            const x = Math.round(touch.clientX - cRect.left - dim.playerOffsetLeft);
+            const y = Math.round(touch.clientY - cRect.top - dim.playerOffsetTop);
+
+            let radians = (Math.PI / 180) * this._currentRotation,
+                cos = Math.cos(radians),
+                sin = Math.sin(radians),
+                nx = Math.round((cos * x) + (sin * y)),
+                ny = Math.round((cos * y) - (sin * x));
+
+            let pos
+            switch (this._currentRotation) {
+                case 0:
+                    pos = this._coordConverter.convert(nx, ny, this._dimensions)
+                    break
+                case 90:
+                    ny += dim.playerWidth
+                    pos = this._coordConverter.convert(ny, nx, this._dimensions);
+                    [pos.x, pos.y] = [pos.y, pos.x]
+                    break
+                case 180:
+                    nx += dim.playerWidth
+                    ny += dim.playerHeight
+                    pos = this._coordConverter.convert(nx, ny, this._dimensions)
+                    break
+                case 270:
+                    nx += dim.playerHeight
+                    pos = this._coordConverter.convert(ny, nx, this._dimensions);
+                    [pos.x, pos.y] = [pos.y, pos.x]
+                    break
+            }
+
+            let e = {
+                x: pos.x,
+                y: pos.y,
+                id: id
+            }
+
             if (eventType === "touch-move") {
                 // We should not fire the duplicated touch-move event as this will have a bad impact
                 // on Android input dispatching, which could cause ANR if the touched window's input
@@ -1140,10 +1016,18 @@ class AnboxStream {
         return true
     }
 
-    _onTouchStart(event) {this._touchEvent(event, 'touch-start')};
-    _onTouchEnd(event) {this._touchEvent(event, 'touch-end')};
-    _onTouchCancel(event) {this._touchEvent(event, 'touch-cancel')};
-    _onTouchMove(event) {this._touchEvent(event, 'touch-move')};
+    _onTouchStart(event) {
+        this._touchEvent(event, 'touch-start')
+    };
+    _onTouchEnd(event) {
+        this._touchEvent(event, 'touch-end')
+    };
+    _onTouchCancel(event) {
+        this._touchEvent(event, 'touch-cancel')
+    };
+    _onTouchMove(event) {
+        this._touchEvent(event, 'touch-move')
+    };
 
     _queryGamePadEvents() {
         if (!this._options.controls.gamepad)
@@ -1155,48 +1039,6 @@ class AnboxStream {
         }
     };
 
-    _onMessageReceived(event) {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "open-camera") {
-            if (this._allowAccessCamera || this._options.callbacks.requestCameraAccess()) {
-                const spec = JSON.parse(msg.data);
-                this._openCamera(spec);
-            }
-        } else if (msg.type === "close-camera") {
-            this._closeCamera();
-        } else if (msg.type === "enable-microphone") {
-            if (this._allowAccessMicrophone || this._options.callbacks.requestMicrophoneAccess()) {
-                const spec = JSON.parse(msg.data);
-                this._enableMicrophone(spec);
-            }
-        } else if (msg.type === "disable-microphone") {
-            this._disableMicrophone();
-        } else if (msg.type === "show-ime") {
-            // The client-side virtual keyboard will pop down automatically
-            // if a user clicks any area of video element as video element
-            // is not input friendly. So we have to
-            // 1. make video's container editable
-            // 2. set focus on video's container
-            // This prevents client side virtual keyboard from losing focus
-            // and hiding afterward when a user interacts with UI.
-            // Also since AnboxWebView takes over input connection channel,
-            // when anbox ime is enabled and video container is editable,
-            // there would be no text sent to the video container but to
-            // Android container via our own private protocol.
-            if (!this._nullOrUndef(IMEJSInterface)) {
-                this._setVideoContainerFocused(true);
-                IMEJSInterface.openVirtualKeyboard();
-            }
-        } else if (msg.type === "hide-ime") {
-            if (!this._nullOrUndef(IMEJSInterface)) {
-                this._setVideoContainerFocused(false);
-                IMEJSInterface.hideVirtualKeyboard();
-            }
-        } else {
-            this._options.callbacks.messageReceived(msg.type, msg.data);
-        }
-    }
-
     _setVideoContainerFocused(enabled) {
         const videoContainer = document.getElementById(this._containerID);
         videoContainer.contentEditable = enabled;
@@ -1206,212 +1048,8 @@ class AnboxStream {
             videoContainer.blur();
     }
 
-    _enableMicrophone(spec) {
-        navigator.mediaDevices.getUserMedia({
-            audio: {
-                sampleRate: spec["freq"],
-                channelCount: spec["channels"],
-                samples: spec["channels"],
-            },
-            video: false
-        })
-        .then(this._onRealAudioInputStreamAvailable.bind(this))
-        .catch(e => {
-            this._stopStreamingOnError(`failed to open microphone: ${e.name}`);
-        })
-    }
-
-    _onVideoInputStreamAvailable(stream) {
-        this._videoInputStream = stream;
-        this._videoInputStream.getTracks().forEach(
-            track => this._pc.addTrack(track, stream));
-    }
-
-    _onRealAudioInputStreamAvailable(stream) {
-      // Replace the existing dummy video stream with the real audio input stream
-      const kind = stream.getAudioTracks()[0].kind;
-      this._replaceTrack(stream, kind);
-      this._audioInputStream = stream;
-      this._allowAccessMicrophone = true;
-    }
-
-    _onRealVideoInputStreamAvailable(stream) {
-        // Replace the existing dummy video stream with the real camera video stream
-        const kind = stream.getVideoTracks()[0].kind;
-        this._replaceTrack(stream, kind);
-        this._videoInputStream = stream;
-        this._allowAccessCamera = true;
-    }
-
-    _openCamera(spec) {
-        const resolution = spec["resolution"]
-        const facingMode = spec["facing-mode"] === "front" ? "user": "environment"
-        const frameRate = spec["frame-rate"]
-        navigator.mediaDevices.getUserMedia({
-            video: {
-                width: resolution.width,
-                height: resolution.height,
-                facingMode: {
-                    ideal: facingMode
-                },
-                frameRate: {
-                    max: frameRate,
-                }
-            },
-        })
-        .then(this._onRealVideoInputStreamAvailable.bind(this))
-        .catch(e => {
-            this._options.callbacks.error(
-              new Error(`failed to open camera: ${e.name}`));
-        })
-    }
-
-    _closeCamera() {
-        if (this._videoInputStream)
-            this._videoInputStream.getTracks().forEach(track => track.stop());
-
-        // Replace the real camera video stream with the dummy video stream
-        let stream = new MediaStream([this._createDummyVideoTrack()]);
-        stream.getTracks().forEach(track => track.stop());
-        const kind = stream.getVideoTracks()[0].kind;
-        this._replaceTrack(stream, kind);
-        this._videoInputStream = stream;
-    }
-
-    _disableMicrophone() {
-        if (this._audioInputStream)
-            this._audioInputStream.getTracks().forEach(track => track.stop());
-
-        // Replace the real audio stream captured from microphone with the dummy stream
-        let stream = new MediaStream([this._createDummyAudioTrack()]);
-        stream.getTracks().forEach(track => track.stop());
-        const kind = stream.getAudioTracks()[0].kind;
-        this._replaceTrack(stream, kind);
-        this._audioInputStream = stream;
-    }
-
-    _createDummyStream() {
-        // Create a dummy audio and video tracks before creating an offer
-        // This enables pc connection to switch to real audio and video streams
-        // captured from microphone and camera later when opening the those
-        // devices without re-negotiation.
-        let tracks = [];
-        if (this._options.devices.camera) {
-            let video_track = this._createDummyVideoTrack();
-            tracks.push(video_track);
-        }
-        if (this._options.devices.microphone) {
-            let audio_track = this._createDummyAudioTrack();
-            tracks.push(audio_track);
-        }
-        if (tracks.length === 0)
-            return null;
-
-        return new MediaStream(tracks);
-    }
-
-    _createDummyAudioTrack() {
-        let ctx = new AudioContext(), oscillator = ctx.createOscillator();
-        let dst = oscillator.connect(ctx.createMediaStreamDestination());
-        return Object.assign(dst.stream.getAudioTracks()[0], {enabled: false});
-    }
-
-    _createDummyVideoTrack() {
-        const container = document.getElementById(this._containerID);
-        const width = container.clientWidth;
-        const height = container.clientHeight;
-        let canvas = Object.assign(document.createElement("canvas"), {width, height});
-        canvas.getContext('2d').fillRect(0, 0, width, height);
-        let stream = canvas.captureStream();
-        return Object.assign(stream.getVideoTracks()[0], {enabled: false});
-    }
-
-    _replaceTrack(stream, kind) {
-        this._pc.getSenders()
-            .filter(sender => (sender.track !== null && sender.track.kind === kind))
-            .map(sender => {
-                return sender.replaceTrack(stream.getTracks().find(
-                  t => t.kind === sender.track.kind));
-            });
-    }
-
-    _createOffer() {
-        let dummy_stream = this._createDummyStream();
-        if (dummy_stream != null) {
-            this._onVideoInputStreamAvailable(dummy_stream);
-        }
-
-        this._pc.createOffer().then(this._onRtcOfferCreated.bind(this)).catch(function(err) {
-            this._stopStreamingOnError(`failed to create WebRTC offer: ${err}`);
-        });
-    }
-
-    _nullOrUndef(obj) { return obj === null || obj === undefined };
-
-    _onWsOpen() {
-        const config = { iceServers: this._options.stunServers };
-        this._pc = new RTCPeerConnection(config);
-        this._pc.ontrack = this._onRtcTrack.bind(this);
-        this._pc.oniceconnectionstatechange = this._onRtcIceConnectionStateChange.bind(this);
-        this._pc.onicecandidate = this._onRtcIceCandidate.bind(this);
-
-        let audio_direction = 'inactive'
-        if (this._options.devices.speaker) {
-            if (this._options.devices.microphone)
-                audio_direction = 'sendrecv'
-            else
-                audio_direction = 'recvonly'
-        }
-        this._pc.addTransceiver('audio', {direction: audio_direction})
-        if (this._options.devices.camera) {
-            this._pc.addTransceiver('video', {direction: 'sendonly'})
-        }
-        this._pc.addTransceiver('video', {direction: 'recvonly'})
-        this._controlChan = this._pc.createDataChannel('control');
-        this._controlChan.addEventListener('message', this._onMessageReceived.bind(this));
-
-        if (this._options.foregroundActivity.length > 0) {
-            let msg = {
-              type: 'settings',
-              foreground_activity: this._options.foregroundActivity,
-            };
-            this._ws.send(JSON.stringify(msg));
-        }
-
-        this._createOffer();
-    };
-
-    _onWsClose() {
-
-        if (!this._ready || !this._signalingFailed) {
-            // When the connection was closed from the gateway side we have to
-            // stop the timer here to avoid it triggering when we already
-            // terminated our connection
-            if (this._timer > 0)
-                window.clearTimeout(this._timer);
-        }
-
-        if (!this._ready && !this._signalingFailed) {
-            this._stopStreamingOnError('connection to signaler was interrupted while trying to establish a WebRTC connection');
-        }
-    };
-
-    _onWsError(event) {
-        this._stopStreamingOnError('failed to communicate with the signaler');
-    };
-
-    _onWsMessage(event) {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'answer') {
-            this._pc.setRemoteDescription(new RTCSessionDescription({type: 'answer', sdp: atob(msg.sdp)}));
-        } else if (msg.type === 'candidate') {
-            this._pc.addIceCandidate({'candidate': atob(msg.candidate), 'sdpMLineIndex': msg.sdpMLineIndex, 'sdpMid': msg.sdpMid});
-        } else if (msg.type === 'error') {
-            this._signalingFailed = true;
-            this._stopStreamingOnError(msg.message);
-        } else {
-            console.log('Unknown message type ' + msg.type);
-        }
+    _nullOrUndef(obj) {
+        return obj === null || obj === undefined
     };
 
     _stopStreamingOnError(errorMsg) {
@@ -1474,7 +1112,11 @@ class _gamepadEventManager {
                         if (cacheButtons[j].pressed !== buttons[j].pressed) {
                             // Check the table at the following link that describes the buttons/axes
                             // index and their physical locations.
-                            this._sendInputEvent('gamepad-button', {id: gamepad.index, index: j, pressed: buttons[j].pressed});
+                            this._sendInputEvent('gamepad-button', {
+                                id: gamepad.index,
+                                index: j,
+                                pressed: buttons[j].pressed
+                            });
                             cacheButtons[j].pressed = buttons[j].pressed;
                         }
                     }
@@ -1498,12 +1140,15 @@ class _gamepadEventManager {
                     for (let k = 0; k < axes.length; k++) {
                         if (cacheAxes[k] !== axes[k]) {
                             switch (true) {
-                                case k < this._dpad_remap_start_index:  // Standard axes
-                                    this._sendInputEvent('gamepad-axes', {id: gamepad.index, index: k, value: axes[k]});
+                                case k < this._dpad_remap_start_index: // Standard axes
+                                    this._sendInputEvent('gamepad-axes', {
+                                        id: gamepad.index,
+                                        index: k,
+                                        value: axes[k]
+                                    });
                                     break;
                                 case k === this._dpad_remap_start_index: // DPAD left and right buttons
-                                    if (axes[k] === 0) {}
-                                    else if (axes[k] === -1) {
+                                    if (axes[k] === 0) {} else if (axes[k] === -1) {
                                         dpad_button_index = this._dpad_standard_start_index + 2;
                                     } else {
                                         dpad_button_index = this._dpad_standard_start_index + 3;
@@ -1516,8 +1161,7 @@ class _gamepadEventManager {
                                     });
                                     break;
                                 case k === this._dpad_remap_start_index + 1: //  DPAD up and down buttons
-                                    if (axes[k] === 0) {}
-                                    else if (axes[k] === -1) {
+                                    if (axes[k] === 0) {} else if (axes[k] === -1) {
                                         dpad_button_index = this._dpad_standard_start_index;
                                     } else {
                                         dpad_button_index = this._dpad_standard_start_index + 1;
@@ -1570,23 +1214,36 @@ class _gamepadEventManager {
 }
 
 class _coordinateConverter {
-    convert(pos, dimensions) {
-        const x = this._clientToServerX(pos.x, dimensions);
-        const y = this._clientToServerY(pos.y, dimensions);
+    /**
+     * convert will translate position from local events to position from remote container.
+     * @param pointerX {number} X position of the cursor on the video
+     * @param pointerY {number} Y position of the cursor on the video
+     * @param dimensions {object} Dimensions of the local viewport.
+     * @returns {x: number, y: number}
+     */
+    convert(pointerX, pointerY, dimensions) {
+        const x = this._clientToServerX(pointerX, dimensions);
+        const y = this._clientToServerY(pointerY, dimensions);
         return {x: x, y: y}
     };
 
-    _clientToServerX(clientX, d) {
-        let serverX = Math.round((clientX - d.containerOffsetX) * d.scalingFactorX);
-        if (serverX > d.frameW) serverX = d.frameW;
-        if (serverX < 0) serverX = 0;
+    _clientToServerX(clientX, dimensions) {
+        let serverX = Math.round(clientX / dimensions.scalePercentage)
+        if (serverX > dimensions.videoWidth)
+            serverX = dimensions.videoWidth
+        else if (serverX < 0)
+            serverX = 0
+
         return serverX;
     };
 
-    _clientToServerY(clientY, d) {
-        let serverY = Math.round((clientY - d.containerOffsetY) * d.scalingFactorY);
-        if (serverY > d.frameH) serverY = d.frameH;
-        if (serverY < 0) serverY = 0;
+    _clientToServerY(clientY, dimensions) {
+        let serverY = Math.round(clientY / dimensions.scalePercentage)
+        if (serverY > dimensions.videoHeight)
+            serverY = dimensions.videoHeight
+        else if (serverY < 0)
+            serverY = 0
+
         return serverY;
     };
 }
@@ -1700,11 +1357,911 @@ const _imeEventType = {
     ComposingRegion: 0x5,
 };
 
-const _android_KEYCODE_DEL = 67
-const _activityNamePattern = /(^([A-Za-z]{1}[A-Za-z\d_]*\.){2,}|^(\.){1})[A-Za-z][A-Za-z\d_]*$/
+class AnboxWebRTCManager {
+    /**
+     * Handle the signaling process to establish a WebRTC stream between a client
+     * and a container.
+     * Requires a Session object and returns a video + audio element.
+     * @param options {Object} configuration of the WebRTC stream
+     * @param [options.enableSpeakers=true] {boolean} Enable speakers
+     * @param [options.enableMic=false] {boolean} Enable microphone
+     * @param [options.enableCamera=false] {boolean} Enable camera
+     * @param [options.deviceType] {string} Indicate the type of the device the SDK is running on
+     * @param [options.foregroundActivity] {string} Activity to be displayed in the foreground. NOTE: it only works with an application that has APK provided on its creation.
+     * @param [options.stats] {Object}
+     * @param [options.stats.enable=false] {boolean} Enable collection of statistics. Not recommended in production
+     * @param [options.stats.overlayID] {string} ID of the container in which the stat overlay will be displayed. Can be the stream container ID or something else.
+     * @param [options.debug=false] {boolean} Enable debug log
+     */
+    constructor(options) {
+        this._ws = null
+        this._pc = null
+        this._controlChan = null
+        this._stunServers = []
+
+        // Timer global to the whole signaling process
+        this._signalingTimeout = null;
+
+        // Timer used to give the SDK a chance to reconnect if something goes wrong temporarily
+        this._disconnectedTimeout = null;
+
+        this._videoStream = null;
+        this._audioStream = null;
+        this._audioInputStream = null;
+        this._videoInputStream = null;
+
+        this._userMedia = {}
+        this._userMedia.speakers = options.enableSpeakers || true;
+        this._userMedia.mic = options.enableMic || false;
+        this._userMedia.camera = options.enableCamera || false;
+
+        this._deviceType = options.deviceType || '';
+        this._foregroundActivity = options.foregroundActivity || '';
+
+        this._startTimer = performance.now()
+        this._statsEnabled = options.stats?.enable || false
+        this._statsOverlayID = options.stats?.overlayID
+        this._showStatsOverlay = false
+        this._stats = {
+            rtcConfig: {
+                sdpSemantics: '',
+                rtcpMuxPolicy: '',
+                bundlePolicy: '',
+                iceTransportPolicy: '',
+                iceCandidatePoolSize: '',
+            },
+            network: {
+                currentRtt: 0,
+                networkType: '',
+                transportType: '',
+                localCandidateType: '',
+                remoteCandidateType: ''
+            },
+            video: {
+                bandwidthMbit: 0,
+                totalBytesReceived: 0,
+                fps: 0,
+                decodeTime: 0,
+                jitter: 0,
+                avgJitterBufferDelay: 0,
+                packetsReceived: 0,
+                packetsLost: 0
+            },
+            audioOutput: {
+                bandwidthMbit: 0,
+                totalBytesReceived: 0,
+                totalSamplesReceived: 0,
+                jitter: 0,
+                avgJitterBufferDelay: 0,
+                packetsReceived: 0,
+                packetsLost: 0
+            },
+            audioInput: {
+                bandwidthMbit: 0,
+                totalBytesSent: 0
+            },
+        }
+
+        this._lastReport = {
+            video: {},
+            audioOutput: {},
+            audioInput: {},
+        }
+
+        this._debugEnabled = options.debug;
+
+        this._onError = () => {}
+        this._onReady = () => {}
+        this._onClose = () => {}
+        this._onMicRequested = () => false
+        this._onCameraRequested = () => false
+        this._onMessage = () => {}
+        this._onStatsUpdated = () => {}
+    }
+
+    /**
+     * @callback onWebRTCReady
+     * @param videoSrc {Object} Stream to attach to the video element
+     * @param audioSrc {Object} Stream to attach to the audio element
+     */
+    /**
+     * Called when the video track has been successfully created
+     * @param callback {onWebRTCReady} Callback invoked with video and audio streams
+     */
+    onReady(callback) {
+        this._onReady = callback
+    }
+
+    /**
+     * @callback onWebRTCError
+     * @param error {string} Error message
+     */
+    /**
+     * Called when the video track has been successfully created
+     * @param callback {onWebRTCError} Callback invoked with error message
+     */
+    onError(callback) {
+        this._onError = (err) => {
+            if (this._debugEnabled)
+                console.error(err)
+            callback(err)
+            this.stop()
+        }
+    }
+
+    /**
+     * @callback onWebRTCClose
+     */
+    /**
+     * Called when the stream is closed gracefully
+     * @param callback {onWebRTCClose} Callback invoked when the stream is finished
+     */
+    onClose(callback) {
+        this._onClose = callback
+    }
+
+    /**
+     * @callback onMicrophoneRequested
+     * @return {boolean} True if access to the microphone is granted (default: false)
+     */
+    /**
+     * Called when the permission to user the user microphone is requested
+     * @param callback {onMicrophoneRequested} Callback invoked when requesting microphone
+     */
+    onMicrophoneRequested(callback) {
+        this._onMicRequested = callback
+    }
+
+    /**
+     * @callback onCameraRequested
+     * @return {boolean} True if access to the camera is granted (default: false)
+     */
+    /**
+     * Called when the permission to user the user camera is requested
+     * @param callback {onCameraRequested} Callback invoked when requesting camera
+     */
+    onCameraRequested(callback) {
+        this._onCameraRequested = callback
+    }
+
+    /**
+     * @callback onMessage
+     * @param type {string} Type of message
+     * @param data {string} Content of the message
+     */
+    /**
+     * Called when received a message from the Anbox container
+     * @param callback {onMessage} Callback invoked when receiving a message from the Anbox container
+     */
+    onMessage(callback) {
+        this._onMessage = callback
+    }
+
+    /**
+     * @callback onStatsUpdated
+     * @param stats {Object} Statistics of the current stream
+     */
+    /**
+     * Called when statistics are updated
+     * @param callback {onStatsUpdated} Callback invoked when stream statistics are updated
+     */
+    onStatsUpdated(callback) {
+        this._onStatsUpdated = callback
+    }
+
+    /**
+     * Start the signaling process
+     * @param session {Object} Session object returned by the Stream Gateway
+     * @param session.websocket {string} URL of the websocket on which to start the signaling process
+     * @param session.stunServers {Object[]} List of additional STUN/TURN servers
+     */
+    start(session) {
+        if (session.websocket === undefined || session.websocket.length === 0) {
+            throw new Error('connector did not return any signaling information')
+        }
+
+        if (session.stunServers.length > 0)
+            this._includeStunServers(session.stunServers)
+
+        this._signalingTimeout = window.setTimeout(() => this._onError('signaling timed out'), 5 * 60 * 1000);
+        this._connectSignaler(session.websocket)
+    }
+
+    stop() {
+        this._log('stopping')
+        window.clearTimeout(this._signalingTimeout);
+        window.clearTimeout(this._disconnectedTimeout);
+        window.clearInterval(this._statsTimerId)
+
+        // Notify the other side that we're disconnecting to speed up potential reconnects
+        this.sendControlMessage("stream::disconnect", {});
+
+        if (this._ws !== null) {
+            this._ws.close()
+            this._ws = null
+        }
+
+        if (this._pc !== null) {
+            this._pc.close();
+            this._pc = null;
+        }
+
+        if (this._audioInputStream)
+            this._audioInputStream.getTracks().forEach(track => track.stop());
+
+        if (this._videoInputStream)
+            this._videoInputStream.getTracks().forEach(track => track.stop());
+    }
+
+    /**
+     * Display statistics about the current stream in an overlay window
+     */
+    showStatsOverlay() {
+        if (!this._statsOverlayID || this._statsOverlayID.length === 0)
+            throw new Error('no overlay container id given at initialization')
+
+        const container = document.getElementById(this._statsOverlayID)
+        if (!container)
+            throw new Error('invalid overlay container')
+
+        this._showStatsOverlay = true
+
+        const stats = document.createElement('div');
+        stats.id = this._statsOverlayID + '_child';
+        stats.style.position = "absolute";
+        stats.style.left = "0px";
+        stats.style.top = "0px";
+        stats.style.width = "250px";
+        stats.style.backgroundColor = "rgba(0,0,0,0.75)";
+        stats.style.color = "white";
+        stats.style.fontSize = "x-small";
+        stats.style.borderRadius = "3px";
+        stats.style.lineHeight = "20px";
+        stats.style.whiteSpace = "pre";
+        // Ignore the pointer interaction on stats overlay
+        stats.style.pointerEvents = "none";
+        container.appendChild(stats);
+    }
+
+    /**
+     * Hide statistics overlay
+     */
+    hideStatsOverlay() {
+        this._showStatsOverlay = false
+
+        const stats = document.getElementById(this._statsOverlayID + '_child')
+        if (!stats)
+            throw new Error('invalid overlay container')
+
+        stats.remove()
+    }
+
+    /**
+     * video: Statistics on the received video track.
+     *   bandwidthMbit: Video traffic received in mbits/s.
+     *   totalBytesReceived: Total cumulated bytes received for the current session.
+     *   fps: Current frames per second.
+     *   decodeTime: Average time in ms to decode a frame.
+     *   jitter: Total cumulated packet delay in seconds. A high jitter can mean an unstable or congested network.
+     *   avgJitterBufferDelay: Average variance in packet delay in seconds. A high jitter can mean an unstable or congested network.
+     *   packetsReceived: Total number of packets received.
+     *   packetsLost: Total number of packets lost.
+     * network: Information about the network and WebRTC connections.
+     *   currentRtt: Current round trip time in seconds.
+     *   networkType: Type of network in use. Can be one of the following:
+     *       bluetooth: This connection uses bluetooth.
+     *       celullar: The connection uses a cellular data service to connect. This includes all cellular data services including EDGE (2G), HSPA (3G), LTE (4G), and NR (5G).
+     *       ethernet: This connection uses an ethernet network.
+     *       wifi: This connection uses WiFi.
+     *       wimax: This connection uses a Wimax network.
+     *       vpn: This connection uses a VPN which obscures the underlying connection type.
+     *       unknown: The user's browser is unable or unwilling to identify the underlying connection technology used by the described connection.
+     *   transportType: Network protocol in use.
+     *   localCandidateType: Type of the local client WebRTC candidate. Can be one of the following:
+     *       host: Local client is accessible directly via IP.
+     *       srflx: Local client is accessible behind NAT.
+     *       prflx: Local client is accessible behind a symmetric NAT.
+     *       relay: Traffic is relayed to the local client via a TURN server. Relayed traffic can induce poor performance.
+     *   remoteCandidateType: Type of the remote peer (Anbox container) WebRTC candidate. Can be one of the following:
+     *       host: Remote peer is accessed directly via IP.
+     *       srflx: Remote peer is accessed behind NAT.
+     *       prflx: Remote peer is accessed behind a symmetric NAT.
+     *       relay: Traffic is relayed to the remote peer via a TURN server. Relayed traffic can induce poor performance.
+     * audioInput: Statistics related to the audio sent to the Anbox container
+     *   bandwidthMbit: Audio traffic sent in mbits/s
+     *   totalBytesSent: Total cumulated bytes sent for audio for the current session.
+     * audioOutput: Information on the received audio track.
+     *   bandwidthMbit: Audio traffic received in mbits/s.
+     *   totalBytesReceived: Total cumulated bytes received for the current session.
+     *   jitter: Total cumulated packet delay in seconds. A high jitter can mean an unstable or congested network.
+     *   avgJitterBufferDelay: Average variance in packet delay in seconds. A high jitter can mean an unstable or congested network.
+     *   totalSamplesReceived: Total number of audio samples received for the current session.
+     *   packetsReceived: Total number of packets received.
+     *   packetsLost: Total number of packets lost.
+     * rtcConfig: Information on the WebRTC connection
+     *   bundlePolicy: Policy on how to negotiate tracks if the remote peer is not bundle aware. If bundle aware, all tracks are generated on the same transport. Can be one of the wing:
+     *       balanced: Gather ICE candidates for each media type in use (audio, video, and data). If the remote endpoint is not bundle-aware, negotiate only one audio and video track on separate transports.
+     *       max-compat: Gather ICE candidates for each track. If the remote endpoint is not bundle-aware, negotiate all media tracks on separate transports.
+     *       max-bundle: Gather ICE candidates for only one track. If the remote endpoint is not bundle-aware, negotiate only one media track.
+     *   rtcpMuxPolicy: affects what ICE candidates are gathered to support non-multiplexed RTCP. The only value "require".
+     *   sdpSemantics: Describes which style of SDP offers and answers is used.
+     *   iceTransportPolicy: Policy for accepting ICE candidates. Can be one of the following:
+     *       all: Accept all candidates.
+     *       relay: Only accept candidates whose IP are being relayed, such as via a TURN server.
+     *   iceCandidatePoolSize: Size of the prefetched ICE candidate pool.
+     */
+    getStats() {
+        return this._stats;
+    }
+
+    /**
+     * Send a control message to the Android container
+     * @param type {string} Message type
+     * @param data {Object} Message content to be JSON serialized
+     */
+    sendControlMessage(type, data) {
+        if (this._controlChan === null || this._controlChan.readyState !== 'open') {
+            throw new Error('control channel not open yet')
+        }
+        this._controlChan.send(JSON.stringify({
+            type: type,
+            data: data
+        }));
+    }
+
+    _log(msg) {
+        if (!this._debugEnabled)
+            return
+        const timeElapsed = performance.now() - this._startTimer
+        console.info(`Anbox SDK WebRTC [${Math.round(timeElapsed)}ms] : ${msg}`)
+    }
+
+    _connectSignaler(url) {
+        this._ws = new WebSocket(url);
+        this._ws.onopen = this._onWsOpen.bind(this);
+        this._ws.onerror = this._onWsError.bind(this);
+        this._ws.onmessage = this._onWsMessage.bind(this);
+    }
+
+    _includeStunServers(stun_servers) {
+        for (let n = 0; n < stun_servers.length; n++) {
+            this._stunServers.push({
+                "urls": stun_servers[n].urls,
+                "username": stun_servers[n].username,
+                "credential": stun_servers[n].password
+            });
+        }
+    };
+
+    _onWsOpen() {
+        const config = {
+            iceServers: this._stunServers
+        };
+        this._pc = new RTCPeerConnection(config);
+        this._pc.ontrack = this._onRtcTrack.bind(this);
+        this._pc.oniceconnectionstatechange = this._onRtcIceConnectionStateChange.bind(this);
+        this._pc.onicecandidate = this._onRtcIceCandidate.bind(this);
+
+        let audio_direction = 'inactive'
+        if (this._userMedia.speakers) {
+            if (this._userMedia.mic)
+                audio_direction = 'sendrecv'
+            else
+                audio_direction = 'recvonly'
+        }
+        this._pc.addTransceiver('audio', {
+            direction: audio_direction
+        })
+
+        if (this._userMedia.camera) {
+            this._pc.addTransceiver('video', {
+                direction: 'sendonly'
+            })
+        }
+
+        this._pc.addTransceiver('video', {
+            direction: 'recvonly'
+        })
+        this._controlChan = this._pc.createDataChannel('control');
+        this._controlChan.onmessage = this._onControlMessageReceived.bind(this);
+        this._controlChan.onerror = (err) => this._onError('error on control channel', err);
+        this._controlChan.onclose = (err) => this._onError('control channel closing', err);
+
+        if (this._deviceType.length > 0) {
+            let msg = {
+                type: 'settings',
+                device_type: this._deviceType
+            };
+            this._ws.send(JSON.stringify(msg));
+        }
+
+        if (this._foregroundActivity.length > 0) {
+            let msg = {
+                type: 'settings',
+                foreground_activity: this._foregroundActivity,
+            };
+            this._ws.send(JSON.stringify(msg));
+        }
+
+        this._log('creating offer')
+        this._createOffer();
+    };
+
+    _onWsError(err) {
+        this._onError('failed to communicate with the signaler', err);
+    };
+
+    _onWsMessage(event) {
+        const msg = JSON.parse(event.data);
+
+        switch (msg.type) {
+            case 'answer':
+                this._log('got RTC answer')
+                this._pc.setRemoteDescription(new RTCSessionDescription({
+                    type: 'answer',
+                    sdp: atob(msg.sdp)
+                }));
+                break
+
+            case 'candidate':
+                this._log('got RTC candidate')
+                this._pc.addIceCandidate({
+                    'candidate': atob(msg.candidate),
+                    'sdpMLineIndex': msg.sdpMLineIndex,
+                    'sdpMid': msg.sdpMid
+                });
+                break
+
+            case 'error':
+                this._log('got RTC error')
+                this._onError(msg.message);
+                break
+
+            default:
+                console.error('Unknown message type ' + msg.type);
+        }
+    };
+
+    _createOffer() {
+        let dummy_stream = this._createDummyStream();
+        if (dummy_stream != null) {
+            this._onVideoInputStreamAvailable(dummy_stream);
+        }
+
+        this._pc.createOffer()
+            .then(this._onRtcOfferCreated.bind(this))
+            .catch(err => this._onError(`failed to create WebRTC offer: ${err}`));
+    }
+
+    _onRtcOfferCreated(description) {
+        this._pc.setLocalDescription(description);
+        let msg = {
+            type: 'offer',
+            sdp: btoa(description.sdp)
+        };
+        if (this._ws.readyState === 1)
+            this._ws.send(JSON.stringify(msg));
+    };
+
+    _onControlMessageReceived(event) {
+        const msg = JSON.parse(event.data);
+        switch (msg.type) {
+            case "open-camera":
+                if (this._allowAccessCamera || this._onCameraRequested()) {
+                    const spec = JSON.parse(msg.data);
+                    this._openCamera(spec);
+                }
+                break;
+
+            case "close-camera":
+                this._closeCamera();
+                break;
+
+            case "enable-microphone":
+                if (this._allowAccessMicrophone || this._onMicRequested()) {
+                    const spec = JSON.parse(msg.data);
+                    this._enableMicrophone(spec);
+                }
+                break;
+
+            case "disable-microphone":
+                this._disableMicrophone();
+                break;
+
+            case "show-ime":
+                // The client-side virtual keyboard will pop down automatically
+                // if a user clicks any area of video element as video element
+                // is not input friendly. So we have to
+                // 1. make video's container editable
+                // 2. set focus on video's container
+                // This prevents client side virtual keyboard from losing focus
+                // and hiding afterward when a user interacts with UI.
+                // Also since AnboxWebView takes over input connection channel,
+                // when anbox ime is enabled and video container is editable,
+                // there would be no text sent to the video container but to
+                // Android container via our own private protocol.
+                if (!this._nullOrUndef(IMEJSInterface)) {
+                    this._setVideoContainerFocused(true);
+                    IMEJSInterface.openVirtualKeyboard();
+                }
+                break
+
+            case "hide-ime":
+                if (!this._nullOrUndef(IMEJSInterface)) {
+                    this._setVideoContainerFocused(false);
+                    IMEJSInterface.hideVirtualKeyboard();
+                }
+                break
+
+            default:
+                this._onMessage(msg.type, msg.data);
+        }
+    }
+
+    _onRtcTrack(event) {
+        const kind = event.track.kind;
+        if (kind === 'video') {
+            this._videoStream = event.streams[0];
+            this._videoStream.onremovetrack = this._onClose;
+        } else if (kind === 'audio') {
+            this._audioStream = event.streams[0];
+            this._audioStream.onremovetrack = this._onClose;
+        }
+
+        // Prevent streaming until both audio and video tracks are available
+        if (this._videoStream && (!this._userMedia.speakers || this._audioStream)) {
+            this._onReady(this._videoStream, this._audioStream);
+            if (this._statsEnabled)
+                this._startStatsUpdater();
+        }
+    };
+
+    _onRtcIceConnectionStateChange() {
+        if (this._pc === null)
+            return;
+
+        switch (this._pc.iceConnectionState) {
+            case 'failed':
+                this._log('ICE failed')
+                this._onError('failed to establish a WebRTC connection via ICE');
+                break;
+
+            case 'disconnected':
+                this._log('ICE disconnected')
+                // When we end up here the connection may not have closed, but we
+                // just have a temporary network problem. We wait for a moment and
+                // if the connection isn't reestablished we stop streaming
+                this._disconnectedTimeout = window.setTimeout(() => {
+                    this._onError('lost WebRTC connection')
+                }, 10 * 1000);
+                break;
+
+            case 'closed':
+                this._log('ICE closed')
+                if (this._signalingTimeout) {
+                    this._onError('timed out to establish a WebRTC connection as signaler did not respond');
+                    return;
+                }
+                this._onClose();
+                break;
+
+            case 'connected':
+                this._log('ICE connected')
+                window.clearTimeout(this._disconnectedTimeout);
+                window.clearTimeout(this._signalingTimeout);
+                this._ws.close();
+                break;
+
+            default:
+                this._log('received ICE connection state change', this._pc.iceConnectionState)
+        }
+    }
+
+    _onRtcIceCandidate(event) {
+        if (event.candidate !== null && event.candidate.candidate !== "") {
+            const msg = {
+                type: 'candidate',
+                candidate: btoa(event.candidate.candidate),
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex,
+            };
+            if (this._ws.readyState === 1)
+                this._ws.send(JSON.stringify(msg));
+        }
+    };
+
+    _createDummyStream() {
+        // Create a dummy audio and video tracks before creating an offer
+        // This enables pc connection to switch to real audio and video streams
+        // captured from microphone and camera later when opening the those
+        // devices without re-negotiation.
+        let tracks = [];
+        if (this._userMedia.camera) {
+            let video_track = this._createDummyVideoTrack();
+            tracks.push(video_track);
+        }
+        if (this._userMedia.mic) {
+            let audio_track = this._createDummyAudioTrack();
+            tracks.push(audio_track);
+        }
+        if (tracks.length === 0)
+            return null;
+
+        return new MediaStream(tracks);
+    }
+
+    _createDummyAudioTrack() {
+        let ctx = new AudioContext(),
+            oscillator = ctx.createOscillator();
+        let dst = oscillator.connect(ctx.createMediaStreamDestination());
+        return Object.assign(dst.stream.getAudioTracks()[0], {
+            enabled: false
+        });
+    }
+
+    _createDummyVideoTrack() {
+        let canvas = Object.assign(document.createElement("canvas"), {
+            width: 1,
+            height: 1
+        });
+        canvas.getContext('2d').fillRect(0, 0, 1, 1);
+        let stream = canvas.captureStream();
+        return Object.assign(stream.getVideoTracks()[0], {
+            enabled: false
+        });
+    }
+
+    _onVideoInputStreamAvailable(stream) {
+        this._videoInputStream = stream;
+        this._videoInputStream.getTracks().forEach(
+            track => this._pc.addTrack(track, stream));
+    }
+
+    _openCamera(spec) {
+        const resolution = spec["resolution"]
+        const facingMode = spec["facing-mode"] === "front" ? "user" : "environment"
+        const frameRate = spec["frame-rate"]
+        navigator.mediaDevices.getUserMedia({
+            video: {
+                width: resolution.width,
+                height: resolution.height,
+                facingMode: {
+                    ideal: facingMode
+                },
+                frameRate: {
+                    max: frameRate,
+                }
+            },
+        })
+            .then(this._onRealVideoInputStreamAvailable.bind(this))
+            .catch(e => this._onError(`failed to open camera: ${e.name}`))
+    }
+
+    _onRealVideoInputStreamAvailable(stream) {
+        // Replace the existing dummy video stream with the real camera video stream
+        const kind = stream.getVideoTracks()[0].kind;
+        this._replaceTrack(stream, kind);
+        this._videoInputStream = stream;
+        this._allowAccessCamera = true;
+    }
+
+    _replaceTrack(stream, kind) {
+        this._pc.getSenders()
+            .filter(sender => (sender.track !== null && sender.track.kind === kind))
+            .map(sender => {
+                return sender.replaceTrack(stream.getTracks().find(
+                    t => t.kind === sender.track.kind));
+            });
+    }
+
+    _closeCamera() {
+        if (this._videoInputStream)
+            this._videoInputStream.getTracks().forEach(track => track.stop());
+
+        // Replace the real camera video stream with the dummy video stream
+        let stream = new MediaStream([this._createDummyVideoTrack()]);
+        stream.getTracks().forEach(track => track.stop());
+        const kind = stream.getVideoTracks()[0].kind;
+        this._replaceTrack(stream, kind);
+        this._videoInputStream = stream;
+    }
+
+    _enableMicrophone(spec) {
+        navigator.mediaDevices.getUserMedia({
+            audio: {
+                sampleRate: spec["freq"],
+                channelCount: spec["channels"],
+                samples: spec["channels"],
+            },
+            video: false
+        })
+            .then(this._onRealAudioInputStreamAvailable.bind(this))
+            .catch(e => {
+                this._onError(`failed to open microphone: ${e.name}`);
+            })
+    }
+
+    _onRealAudioInputStreamAvailable(stream) {
+        // Replace the existing dummy video stream with the real audio input stream
+        const kind = stream.getAudioTracks()[0].kind;
+        this._replaceTrack(stream, kind);
+        this._audioInputStream = stream;
+        this._allowAccessMicrophone = true;
+    }
+
+    _disableMicrophone() {
+        if (this._audioInputStream)
+            this._audioInputStream.getTracks().forEach(track => track.stop());
+
+        // Replace the real audio stream captured from microphone with the dummy stream
+        let stream = new MediaStream([this._createDummyAudioTrack()]);
+        stream.getTracks().forEach(track => track.stop());
+        const kind = stream.getAudioTracks()[0].kind;
+        this._replaceTrack(stream, kind);
+        this._audioInputStream = stream;
+    }
+
+    _startStatsUpdater() {
+        let pcConf = this._pc.getConfiguration();
+        if (pcConf) {
+            if ("sdpSemantics" in pcConf)
+                this._stats.rtcConfig.sdpSemantics = pcConf.sdpSemantics
+
+            if ("rtcpMuxPolicy" in pcConf)
+                this._stats.rtcConfig.rtcpMuxPolicy = pcConf.rtcpMuxPolicy
+
+            if ("bundlePolicy" in pcConf)
+                this._stats.rtcConfig.bundlePolicy = pcConf.bundlePolicy
+
+            if ("iceTransportPolicy" in pcConf)
+                this._stats.rtcConfig.iceTransportPolicy = pcConf.iceTransportPolicy
+
+            if ("iceCandidatePoolSize" in pcConf)
+                this._stats.rtcConfig.iceCandidatePoolSize = pcConf.iceCandidatePoolSize
+        }
+
+        this._statsTimerId = window.setInterval(() => {
+            if (!this._pc)
+                return
+
+            this._pc.getStats(null).then((rawStats) => {
+                this._processRawStats(rawStats)
+                this._onStatsUpdated(this._stats)
+                if (this._showStatsOverlay)
+                    this._refreshStatsOverlay()
+            });
+        }, 1000);
+    }
+
+    _processRawStats(stats) {
+        stats.forEach(report => {
+            // mediaType is obsolete but kept for backward compatibility
+            // https://www.w3.org/TR/webrtc-stats/#ref-for-dom-rtcrtpstreamstats-mediatype-1
+            if (report.type === 'inbound-rtp' && (report.kind === 'video' || report.mediaType === 'video')) {
+                let v = this._stats.video
+                v.fps = report.framesPerSecond
+                v.packetsLost = report.packetsLost
+                v.packetsReceived = report.packetsReceived
+                v.jitter = report.jitter
+                v.avgJitterBufferDelay = report.jitterBufferDelay / report.jitterBufferEmittedCount
+                v.totalBytesReceived = report.bytesReceived
+                const timeDelta = Math.round(report.timestamp - (this._lastReport.video?.timestamp || report.timestamp - 1000))
+                v.bandwidthMbit = 8 * (report.bytesReceived - (this._lastReport.video?.bytesReceived || 0)) / timeDelta;
+                this._lastReport.video = report
+                if (report.framesDecoded !== 0)
+                    v.decodeTime = report.totalDecodeTime / report.framesDecoded;
+
+            } else if (report.type === 'inbound-rtp' && (report.kind === "audio" || report.mediaType === 'audio')) {
+                let a = this._stats.audioOutput
+                a.totalSamplesReceived = report.totalSamplesReceived
+                a.packetsLost = report.packetsLost
+                a.packetsReceived = report.packetsReceived
+                a.jitter = report.jitter
+                const timeDelta = Math.round(report.timestamp - (this._lastReport.audioOutput?.timestamp || report.timestamp - 1000))
+                a.bandwidthMbit = 8 * (report.bytesReceived - (this._lastReport.audioOutput?.bytesReceived || 0)) / timeDelta
+                a.totalBytesReceived = report.bytesReceived
+                this._lastReport.audioOutput = report
+                if (report.jitterBufferEmittedCount !== 0)
+                    a.avgJitterBufferDelay = report.jitterBufferDelay / report.jitterBufferEmittedCount
+
+            } else if (report.type === 'outbound-rtp' && (report.kind === 'audio' || report.mediaType === 'audio')) {
+                let a = this._stats.audioInput
+                a.totalBytesSent = report.bytesSent
+                const timeDelta = Math.round(report.timestamp - (this._lastReport.audioInput?.timestamp || report.timestamp - 1000))
+                a.bandwidthMbit = 8 * (report.bytesSent - (this._lastReport.audioInput?.bytesSent || 0)) / timeDelta
+                this._lastReport.audioInput = report
+
+            } else if (report.type === 'candidate-pair' && report.nominated && report.state === "succeeded") {
+                let n = this._stats.network
+                n.currentRtt = report.currentRoundTripTime;
+                let network = this._stats.network
+                if (network.networkType === "" ||
+                    network.transportType === "" ||
+                    network.localCandidateType === "" ||
+                    network.remoteCandidateType === "") {
+                        stats.forEach(stat => {
+                            if (stat.id === report.localCandidateId) {
+                                n.localCandidateType = stat.candidateType
+                                n.networkType = stat.networkType
+                            }
+                            if (stat.id === report.remoteCandidateId) {
+                                n.remoteCandidateType = stat.candidateType
+                                n.transportType = stat.protocol
+                            }
+                        })
+                    }
+            }
+        });
+    }
+
+    _refreshStatsOverlay() {
+        let overlay = document.getElementById(this._statsOverlayID + '_child');
+
+        overlay.replaceChildren();
+        const insertHeader = (title) => {
+            let textNode = document.createTextNode(`${title}`);
+            overlay.appendChild(textNode);
+
+            let lineBreak = document.createElement("br");
+            overlay.appendChild(lineBreak);
+        };
+
+        const insertStat = (type, value) => {
+            let textNode = document.createTextNode(`    ${type}: ${value}`);
+            overlay.appendChild(textNode);
+
+            let lineBreak = document.createElement("br");
+            overlay.appendChild(lineBreak);
+        };
+
+        const mbits_format = (v) => (v * 8 / 1000 / 1000).toFixed(2) + " Mbit/s"
+        const mb_format = (v) => (v / 1000 / 1000).toFixed(2) + " MB"
+        const ms_format = (v) => (v * 1000).toFixed(2) + " ms"
+
+        insertHeader("RTC Configuration")
+        if (this._stats.rtcConfig.sdpSemantics !== "")
+            insertStat("sdpSemantics", this._stats.rtcConfig.sdpSemantics)
+        if (this._stats.rtcConfig.rtcpMuxPolicy !== "")
+            insertStat("rtcpMuxPolicy", this._stats.rtcConfig.rtcpMuxPolicy)
+        if (this._stats.rtcConfig.bundlePolicy !== "")
+            insertStat("bundlePolicy", this._stats.rtcConfig.bundlePolicy)
+        if (this._stats.rtcConfig.iceTransportPolicy !== "")
+            insertStat("iceTransportPolicy", this._stats.rtcConfig.iceTransportPolicy)
+        if (this._stats.rtcConfig.iceCandidatePoolSize !== "")
+            insertStat("iceCandidatePoolSize", this._stats.rtcConfig.iceCandidatePoolSize)
+
+        insertHeader("Network")
+        insertStat("currentRtt", ms_format(this._stats.network.currentRtt))
+        insertStat("networkType", this._stats.network.networkType)
+        insertStat("transportType", this._stats.network.transportType)
+        insertStat("localCandidateType", this._stats.network.localCandidateType)
+        insertStat("remoteCandidateType", this._stats.network.remoteCandidateType)
+
+        insertHeader("Video")
+        insertStat("bandWidth", mbits_format(this._stats.video.bandwidthMbit))
+        insertStat("totalBytesReceived", mb_format(this._stats.video.totalBytesReceived))
+        insertStat("fps", this._stats.video.fps)
+        insertStat("decodeTime", ms_format(this._stats.video.decodeTime))
+        insertStat("jitter", ms_format(this._stats.video.jitter))
+        insertStat("avgJitterBufferDelay", ms_format(this._stats.video.avgJitterBufferDelay))
+        insertStat("packetsReceived", this._stats.video.packetsReceived)
+        insertStat("packetsLost", this._stats.video.packetsLost)
+
+        insertHeader("Audio Output")
+        insertStat("bandWidth", mbits_format(this._stats.audioOutput.bandwidthMbit))
+        insertStat("totalBytesReceived", mb_format(this._stats.audioOutput.totalBytesReceived))
+        insertStat("totalSamplesReceived", this._stats.audioOutput.totalSamplesReceived)
+        insertStat("jitter", ms_format(this._stats.audioOutput.jitter))
+        insertStat("avgJitterBufferDelay", ms_format(this._stats.audioOutput.avgJitterBufferDelay))
+        insertStat("packetsReceived", this._stats.audioOutput.packetsReceived)
+        insertStat("packetsLost", this._stats.audioOutput.packetsLost)
+    }
+}
 
 class AnboxStreamGatewayConnector {
-    _nullOrUndef(obj) { return obj === null || obj === undefined };
+    _nullOrUndef(obj) {
+        return obj === null || obj === undefined
+    };
 
     /**
      * Connector for the Anbox Stream Gateway. If no connector is specified for
@@ -1717,7 +2274,7 @@ class AnboxStreamGatewayConnector {
      *        empty, the gateway will try to determine the best region based on user IP
      * @param [options.session.id] {string} If specified, try to join the instance rather than
      *        creating a new one
-     * @param [options.session.app] {string} Application name to run. If a sessionID is specifed
+     * @param [options.session.app] {string} Application name to run. If a sessionID is specified
      *        this field is ignored
      * @param [options.session.app_version=-1] {number} Specific version of the application to run.
      *        If it's not specified, the latest published application version will be in use for a
@@ -1815,8 +2372,8 @@ class AnboxStreamGatewayConnector {
         if (!this._nullOrUndef(this._options.session.idle_time_min))
             appInfo['idle_time_min'] = this._options.session.idle_time_min;
 
-        if (!this._nullOrUndef(this._options.session.app_version)
-            && this._options.session.app_version.length !== 0)
+        if (!this._nullOrUndef(this._options.session.app_version) &&
+            this._options.session.app_version.length !== 0)
             appInfo['app_version'] = this._options.session.app_version
 
         const rawResp = await fetch(this._options.url + '/1.0/sessions/', {
@@ -1843,37 +2400,19 @@ class AnboxStreamGatewayConnector {
     };
 
     async _joinSession() {
-        // Fetch all necessary information about the session including its websocket
-        // URL with a fresh authentication token
-        const rawSessionResp = await fetch(
-            this._options.url + '/1.0/sessions/' + this._options.session.id + '/', {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json, text/plain, */*',
-                'Authorization': 'Macaroon root=' + this._options.authToken,
-                'Content-Type': 'application/json',
-            }
-        });
-        if (rawSessionResp === undefined || rawSessionResp.status !== 200)
-            throw new Error("Session does not exist anymore");
-
-        var response = await rawSessionResp.json();
-        if (response === undefined || response.status !== "success")
-            throw new Error(response.error);
-
         const rawJoinResp = await fetch(
             this._options.url + '/1.0/sessions/' + this._options.session.id + '/join', {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/json, text/plain, */*',
-                'Authorization': 'Macaroon root=' + this._options.authToken,
-                'Content-Type': 'application/json',
-            }
-        })
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'Authorization': 'Macaroon root=' + this._options.authToken,
+                    'Content-Type': 'application/json',
+                }
+            })
         if (rawJoinResp === undefined || rawJoinResp.status !== 200)
-        throw new Error("Session does not exist anymore");
+            throw new Error("Session does not exist anymore");
 
-        response = await rawJoinResp.json();
+        let response = await rawJoinResp.json();
         if (response === undefined || response.status !== "success")
             throw new Error(response.error);
 
@@ -1888,48 +2427,6 @@ class AnboxStreamGatewayConnector {
     disconnect() {}
 }
 
-class TouchEventProcessor {
-    _nullOrUndef(obj) { return obj === null || obj === undefined };
-
-    /**
-     * TouchEventProcessor processes and convert to the valid touch events
-     * that Anbox Platform WebRTC accepts.
-     */
-    constructor(video) {
-        if (this._nullOrUndef(video))
-            throw new Error('missing video element');
-        this._video = video;
-        this._coordConverter = new _coordinateConverter();
-        // NOTE: `navigator.maxTouchPoints` is undefined for iOS 12 and below,
-        //       in this case, we only support two touch points at most, which
-        //       would enable people to perform basic multi touch operations.
-        //       like pinch to zoom.
-        this._maxTouchPoints = navigator.maxTouchPoints;
-        if (this._nullOrUndef(this._maxTouchPoints))
-            this._maxTouchPoints = 2;
-    }
-
-    process(touches, index, dimensions) {
-        const touch = touches[index]
-        let id = touch.identifier;
-        // FIXME: On iOS(Safari), unlike Chrome, each touch event has a fixed identifier (e.g 0, 1)
-        // to differentiate touch point when multiple touch events are processed at the same time,
-        // the touch.identifier on iOS is a unique natural number increase/decrease progressively,
-        // so it can be a negative/positive number/zero. However the input event to be sent to Android
-        // that bind with the id is ABS_MT_SLOT, which the minimum value of the ABS_MT_SLOT axis must
-        // be 0. In this case, we use the index instead, which could mess up touch sequence a bit
-        // on multi touches, but fix the broken touch input system.
-        if (id < 0 || id > this._maxTouchPoints - 1)
-            id = index
-
-        const videoOffset = this._video.getBoundingClientRect()
-        const pos = this._coordConverter.convert(
-          {x: touch.clientX - videoOffset.left,
-           y: touch.clientY - videoOffset.top}, dimensions)
-        return {id: id, x: pos.x, y: pos.y}
-    };
-}
-
 window.AnboxStreamGatewayConnector = AnboxStreamGatewayConnector;
 window.AnboxStream = AnboxStream;
-export { AnboxStreamGatewayConnector, AnboxStream, TouchEventProcessor };
+export { AnboxStreamGatewayConnector, AnboxStream };
