@@ -1627,6 +1627,9 @@ class AnboxWebRTCManager {
      * Hide statistics overlay
      */
     hideStatsOverlay() {
+        if (!this._showStatsOverlay)
+            return;
+
         this._showStatsOverlay = false
 
         const stats = document.getElementById(this._statsOverlayID + '_child')
