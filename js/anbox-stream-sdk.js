@@ -83,6 +83,10 @@ class AnboxStream {
         this._webrtcManager.onError(this._stopStreamingOnError.bind(this))
         this._webrtcManager.onClose(this._stopStreaming.bind(this))
         this._webrtcManager.onStatsUpdated(this._options.callbacks.statsUpdated)
+        this._webrtcManager.onMessage(this._options.callbacks.messageReceived)
+        this._webrtcManager.onCameraRequested(this._options.callbacks.requestCameraAccess)
+        this._webrtcManager.onMicrophoneRequested(this._options.callbacks.requestMicrophoneAccess)
+        this._webrtcManager.onIMEStateChanged(this._IMEStateChanged.bind(this))
 
         // Control options
         this._modifierState = 0;
@@ -1056,6 +1060,28 @@ class AnboxStream {
         this._options.callbacks.error(new Error(errorMsg));
         this._stopStreaming();
     }
+
+    _IMEStateChanged(visible) {
+        // The client-side virtual keyboard will pop down automatically
+        // if a user clicks any area of video element as video element
+        // is not input friendly. So we have to
+        // 1. make video's container editable
+        // 2. set focus on video's container
+        // This prevents client side virtual keyboard from losing focus
+        // and hiding afterward when a user interacts with UI.
+        // Also since AnboxWebView takes over input connection channel,
+        // when anbox ime is enabled and video container is editable,
+        // there would be no text sent to the video container but to
+        // Android container via our own private protocol.
+        if (!this._nullOrUndef(IMEJSInterface)) {
+            this._setVideoContainerFocused(visible);
+            if (visible) {
+                IMEJSInterface.openVirtualKeyboard();
+            } else {
+                IMEJSInterface.hideVirtualKeyboard();
+            }
+        }
+    };
 }
 
 class _gamepadEventManager {
@@ -1457,6 +1483,7 @@ class AnboxWebRTCManager {
         this._onCameraRequested = () => false
         this._onMessage = () => {}
         this._onStatsUpdated = () => {}
+        this._onIMEStateChanged = () => {}
     }
 
     /**
@@ -1547,6 +1574,17 @@ class AnboxWebRTCManager {
      */
     onStatsUpdated(callback) {
         this._onStatsUpdated = callback
+    }
+
+    /**
+     * @callback onIMEStateChanged
+     */
+    /**
+     * Called when the state of IME is changed
+     * @param callback {onIMEStateChanged} Callback invoked when the state of IME is changed
+     */
+    onIMEStateChanged(callback) {
+        this._onIMEStateChanged = callback
     }
 
     /**
@@ -1872,28 +1910,11 @@ class AnboxWebRTCManager {
                 break;
 
             case "show-ime":
-                // The client-side virtual keyboard will pop down automatically
-                // if a user clicks any area of video element as video element
-                // is not input friendly. So we have to
-                // 1. make video's container editable
-                // 2. set focus on video's container
-                // This prevents client side virtual keyboard from losing focus
-                // and hiding afterward when a user interacts with UI.
-                // Also since AnboxWebView takes over input connection channel,
-                // when anbox ime is enabled and video container is editable,
-                // there would be no text sent to the video container but to
-                // Android container via our own private protocol.
-                if (!this._nullOrUndef(IMEJSInterface)) {
-                    this._setVideoContainerFocused(true);
-                    IMEJSInterface.openVirtualKeyboard();
-                }
+                this._onIMEStateChanged(true);
                 break
 
             case "hide-ime":
-                if (!this._nullOrUndef(IMEJSInterface)) {
-                    this._setVideoContainerFocused(false);
-                    IMEJSInterface.hideVirtualKeyboard();
-                }
+                this._onIMEStateChanged(false);
                 break
 
             default:
@@ -2074,7 +2095,7 @@ class AnboxWebRTCManager {
             audio: {
                 sampleRate: spec["freq"],
                 channelCount: spec["channels"],
-                samples: spec["channels"],
+                samples: spec["samples"],
             },
             video: false
         })
