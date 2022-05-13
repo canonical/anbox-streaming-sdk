@@ -481,6 +481,7 @@ class AnboxStream {
     };
 
     _stopStreaming() {
+        this._webrtcManager.stop();
         this._unregisterControls();
         this._removeMedia();
 
@@ -493,16 +494,14 @@ class AnboxStream {
     _registerControls() {
         window.addEventListener('resize', this._onResize)
 
-        const container = document.getElementById(this._containerID)
         this._coordConverter = new _coordinateConverter()
-
         // NOTE: `navigator.maxTouchPoints` is undefined for iOS 12 and below,
         //       in this case, we only support two touch points at most, which
         //       would enable people to perform basic multi touch operations.
         //       like pinch to zoom.
         this._maxTouchPoints = navigator.maxTouchPoints || 2;
-
         if (this._options.controls.mouse) {
+            const container = document.getElementById(this._containerID)
             if (container) {
                 for (const controlName in this.controls.touch)
                     container.addEventListener(controlName, this.controls.touch[controlName]);
@@ -594,10 +593,10 @@ class AnboxStream {
         // Removing the video container should automatically remove all event listeners
         // but this is dependant on the garbage collector, so we manually do it if we can
         if (this._options.controls.mouse) {
-            const video = document.getElementById(this._videoID);
-            if (video) {
+            const container = document.getElementById(this._containerID)
+            if (container) {
                 for (const controlName in this.controls.touch)
-                    video.removeEventListener(controlName, this.controls.touch[controlName])
+                    container.removeEventListener(controlName, this.controls.touch[controlName])
             }
         }
 
@@ -956,6 +955,12 @@ class AnboxStream {
             const cRect = container.getBoundingClientRect();
             const x = Math.round(touch.clientX - cRect.left - dim.playerOffsetLeft);
             const y = Math.round(touch.clientY - cRect.top - dim.playerOffsetTop);
+
+            // Ignore events outside the video element
+            if (x < 0 || x > dim.playerWidth ||
+                y < 0 || y > dim.playerHeight) {
+                return
+            }
 
             let radians = (Math.PI / 180) * this._currentRotation,
                 cos = Math.cos(radians),
@@ -1612,7 +1617,10 @@ class AnboxWebRTCManager {
         window.clearInterval(this._statsTimerId)
 
         // Notify the other side that we're disconnecting to speed up potential reconnects
-        this.sendControlMessage("stream::disconnect", {});
+        // NOTE: do not send a control message if the data channel is not created yet.
+        //       E.g. a peer connection is not established at all.
+        if (this._controlChan !== null)
+            this.sendControlMessage("stream::disconnect", {});
 
         if (this._ws !== null) {
             this._ws.close()
@@ -1806,7 +1814,7 @@ class AnboxWebRTCManager {
         this._controlChan = this._pc.createDataChannel('control');
         this._controlChan.onmessage = this._onControlMessageReceived.bind(this);
         this._controlChan.onerror = (err) => this._onError('error on control channel', err);
-        this._controlChan.onclose = (err) => this._onError('control channel closing', err);
+        this._controlChan.onclose = () => this._log('control channel is closed');
 
         if (this._deviceType.length > 0) {
             let msg = {
