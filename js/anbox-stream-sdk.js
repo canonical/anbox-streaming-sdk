@@ -35,6 +35,7 @@ class AnboxStream {
      * @param [options.devices.speaker=true] {boolean} Enable audio playout through the default audio playback device.
      * @param [options.controls] {object} Configuration how the client can interact with the stream.
      * @param [options.controls.keyboard=true] {boolean} Send key presses to the Android instance.
+     * @param [options.controls.emulateTouch=false] {boolean} Emulate touchscreen by converting mouse inputs to touch inputs
      * @param [options.controls.mouse=true] {boolean} Send mouse events to the Android instance.
      * @param [options.controls.gamepad=true] {boolean} Send gamepad events to the Android instance.
      * @param [options.foregroundActivity] {string} Activity to be displayed in the foreground. NOTE: it only works with an application that has APK provided on its creation.
@@ -48,6 +49,7 @@ class AnboxStream {
      * @param [options.callbacks.requestMicrophoneAccess=none] {function} Called when Android application tries to open microphone device for video streaming.
      * @param [options.experimental] {object} Experimental features. Not recommended on production.
      * @param [options.experimental.disableBrowserBlock=false] {boolean} Don't throw an error if an unsupported browser is detected.
+     * @param [options.experimental.emulatePointerEvent=false] {boolean} Emulate pointer events when their coordinates are outside of the video element.
      * @param [options.experimental.debug=false] {boolean} Print debug logs
      */
     constructor(options) {
@@ -92,22 +94,19 @@ class AnboxStream {
         this._modifierState = 0;
         this._dimensions = null;
         this._gamepadManager = null;
-        this._lastTouchMoves = [];
-        this._coordConverter = null;
 
         this._originalOrientation = null;
         this._currentRotation = 0;
+        this._primaryTouchId = 0;
+        this._pointersOutofBounds = {};
 
         this.controls = {
             touch: {
-                'mousemove': this._onMouseMove.bind(this),
-                'mousedown': this._onMouseButton.bind(this),
-                'mouseup': this._onMouseButton.bind(this),
+                'pointermove': this._onPointerEvent.bind(this),
+                'pointerdown': this._onPointerEvent.bind(this),
+                'pointerup': this._onPointerEvent.bind(this),
+                'pointercancel': this._onPointerEvent.bind(this),
                 'mousewheel': this._onMouseWheel.bind(this),
-                'touchstart': this._onTouchStart.bind(this),
-                'touchend': this._onTouchEnd.bind(this),
-                'touchcancel': this._onTouchCancel.bind(this),
-                'touchmove': this._onTouchMove.bind(this),
             },
             keyboard: {
                 'keydown': this._onKey.bind(this),
@@ -119,7 +118,7 @@ class AnboxStream {
         this.releaseKeyboard = this.releaseKeyboard.bind(this);
         this.captureKeyboard = this.captureKeyboard.bind(this);
         this._onResize = this._onResize.bind(this);
-    };
+    }
 
     /**
      * Connect a new instance for the configured application or attach to an existing one
@@ -144,7 +143,7 @@ class AnboxStream {
             this._stopStreamingOnError(e);
             return
         }
-    };
+    }
 
     /**
      * Disconnect an existing stream and remove the video & audio elements.
@@ -154,7 +153,7 @@ class AnboxStream {
     disconnect() {
         this._stopStreaming();
         this._options.connector.disconnect();
-    };
+    }
 
     /**
      * Show overall statistics in an overlay during the streaming.
@@ -218,7 +217,7 @@ class AnboxStream {
             this._webrtcManager.showStatsOverlay()
         else
             this._webrtcManager.hideStatsOverlay()
-    };
+    }
 
     /**
      * Toggle fullscreen for the streamed video.
@@ -263,14 +262,22 @@ class AnboxStream {
             /* IE/Edge */
             videoContainer.msRequestFullscreen();
         }
-    };
+    }
 
     /**
      * Exit fullscreen mode.
      */
     exitFullscreen() {
-        document.exitFullscreen();
-    };
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+            document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+        }
+    }
 
     /**
      * Return the stream ID you can use to access video and audio elements with getElementById
@@ -280,6 +287,20 @@ class AnboxStream {
      */
     getId() {
         return this._id;
+    }
+
+    /**
+     * Enable touch emulation. All mouse inputs are translated to act like touch inputs.
+     */
+    enableTouchEmulation() {
+        this._options.controls.emulateTouch = true;
+    }
+
+    /**
+     * Disable touch emulation
+     */
+    disableTouchEmulation() {
+        this._options.controls.emulateTouch = false;
     }
 
     /**
@@ -330,7 +351,7 @@ class AnboxStream {
             navigator.userAgent.indexOf("Firefox") === -1 &&
             navigator.userAgent.indexOf("Safari") === -1)
             throw new Error("unsupported browser");
-    };
+    }
 
     _fillDefaults(options) {
         if (this._nullOrUndef(options.fullScreen))
@@ -356,6 +377,9 @@ class AnboxStream {
 
         if (this._nullOrUndef(options.controls.mouse))
             options.controls.mouse = true;
+
+        if (this._nullOrUndef(options.controls.emulateTouch))
+            options.controls.emulateTouch = false;
 
         if (this._nullOrUndef(options.controls.gamepad))
             options.controls.gamepad = true;
@@ -384,9 +408,6 @@ class AnboxStream {
         if (this._nullOrUndef(options.callbacks.requestMicrophoneAccess))
             options.callbacks.requestMicrophoneAccess = () => false
 
-        if (this._nullOrUndef(options.disableBrowserBlock))
-            options.disableBrowserBlock = false;
-
         if (this._nullOrUndef(options.foregroundActivity))
             options.foregroundActivity = "";
 
@@ -402,9 +423,12 @@ class AnboxStream {
         if (this._nullOrUndef(options.experimental.disableBrowserBlock))
             options.experimental.disableBrowserBlock = false;
 
+        if (this._nullOrUndef(options.experimental.emulatePointerEvent))
+            options.experimental.emulatePointerEvent = false;
+
         if (this._nullOrUndef(options.experimental.debug))
             options.experimental.debug = false;
-    };
+    }
 
     _validateOptions(options) {
         if (this._nullOrUndef(options.targetElement))
@@ -430,6 +454,8 @@ class AnboxStream {
         let mediaContainer = document.getElementById(this._containerID);
         // We set the container as relative so the video element is absolute to it and not something else
         mediaContainer.style.position = 'relative';
+        // Disable native controls for touch events (zooming, panning)
+        mediaContainer.style.touchAction = 'none';
 
         const video = document.createElement('video');
         video.style.margin = "0";
@@ -443,6 +469,8 @@ class AnboxStream {
         video.controls = false;
         video.id = this._videoID;
         video.playsInline = true;
+        // Disable context menu so we can properly handle right clicks on the video
+        video.setAttribute('oncontextmenu', 'return false;')
         video.onplay = () => {
             this._onResize()
             this._registerControls();
@@ -456,7 +484,7 @@ class AnboxStream {
             audio.controls = false;
             mediaContainer.appendChild(audio);
         }
-    };
+    }
 
     _webrtcReady(videoSource, audioSource) {
         const video = document.getElementById(this._videoID);
@@ -468,7 +496,7 @@ class AnboxStream {
         }
 
         this._options.callbacks.ready()
-    };
+    }
 
     _removeMedia() {
         const video = document.getElementById(this._videoID);
@@ -478,7 +506,7 @@ class AnboxStream {
             video.remove();
         if (audio)
             audio.remove();
-    };
+    }
 
     _stopStreaming() {
         this._webrtcManager.stop();
@@ -489,17 +517,11 @@ class AnboxStream {
             this._gamepadManager.stopPolling()
         }
         this._options.callbacks.done()
-    };
+    }
 
     _registerControls() {
         window.addEventListener('resize', this._onResize)
 
-        this._coordConverter = new _coordinateConverter()
-        // NOTE: `navigator.maxTouchPoints` is undefined for iOS 12 and below,
-        //       in this case, we only support two touch points at most, which
-        //       would enable people to perform basic multi touch operations.
-        //       like pinch to zoom.
-        this._maxTouchPoints = navigator.maxTouchPoints || 2;
         if (this._options.controls.mouse) {
             const container = document.getElementById(this._containerID)
             if (container) {
@@ -509,7 +531,7 @@ class AnboxStream {
         }
 
         this.captureKeyboard()
-    };
+    }
 
     /**
      * Start the capture of keyboard events and send them to the Android container.
@@ -542,14 +564,14 @@ class AnboxStream {
             text: text
         }
         this._sendIMEMessage(_imeEventType.Text, data)
-    };
+    }
 
     sendIMEComposingText(text) {
         const data = {
             text: text
         }
         this._sendIMEMessage(_imeEventType.ComposingText, data)
-    };
+    }
 
     sendIMETextDeletion(counts) {
         if (counts <= 0)
@@ -557,7 +579,7 @@ class AnboxStream {
 
         const _android_KEYCODE_DEL = 67
         this._sendIMECode(_android_KEYCODE_DEL, counts);
-    };
+    }
 
     sendIMEAction(name, params) {
         if (typeof params === 'undefined')
@@ -575,7 +597,7 @@ class AnboxStream {
             params: params
         }
         this._sendIMEMessage(_imeEventType.Action, data);
-    };
+    }
 
     sendIMEComposingRegion(start, end) {
         if (start < 0 || start > end)
@@ -601,7 +623,7 @@ class AnboxStream {
         }
 
         this.releaseKeyboard();
-    };
+    }
 
     /**
      * Calculate how many degrees we should rotate to go from the original orientation to the desired one
@@ -758,7 +780,7 @@ class AnboxStream {
                 });
             }
         }
-    };
+    }
 
     _sendInputEvent(type, data) {
         this._webrtcManager.sendControlMessage('input::' + type, data);
@@ -778,66 +800,213 @@ class AnboxStream {
             data: imeData
         }
         this._webrtcManager.sendControlMessage('input::ime-event', data)
-    };
+    }
 
-    _onMouseMove(event) {
-        // Mouse events are relative to the outer container. We have to translate them to the dimensions of
-        // the video element
+    /**
+     * Convert Javascript API button codes to Android button codes
+     * @param event {PointerEvent}
+     * @returns buttonCode {number}
+     * @private
+     */
+    _getPressedButton(event) {
+        switch (event.button) {
+            case 0: // no button
+                return 1;
+            case 1: // primary button (left click)
+                return 2;
+            case 2: // secondary button (right click)
+                return 3;
+            case 4: // auxiliary button (middle click usually) - NOT CURRENTLY SUPPORTED BY ANBOX
+                return 5;
+            default:
+                console.error('Unknown mouse button', event.button)
+                return 0;
+        }
+    }
+
+    /**
+     * Returns true if a pointer event (move or click) was emitted outside the video
+     * boundaries
+     * @returns {boolean}
+     * @private
+     */
+    _isPointerEventOutOfBounds(event) {
+        return (
+            event.clientX < 0 || event.clientX > this._dimensions.playerWidth ||
+            event.clientY < 0 || event.clientY > this._dimensions.playerHeight
+        )
+    }
+
+    /**
+     * PointerEvents coordinates are relative to the document. This method
+     * removes the various offsets so the (0,0) coordinate corresponds to
+     * to the top left corner of the video element
+     * @param event
+     * @private
+     */
+    _adjustPointerCoordsToVideoBoundaries(event) {
+        const container = document.getElementById(this._containerID)
+        if (!container)
+            throw new Error('invalid container')
         const dim = this._dimensions
         if (!dim)
             throw new Error('SDK not ready')
-
-        const container = document.getElementById(this._containerID)
-
         const cRect = container.getBoundingClientRect();
-        let x = event.clientX - cRect.left - dim.playerOffsetLeft;
-        let y = event.clientY - cRect.top - dim.playerOffsetTop;
+        event.clientX = Math.round(event.clientX - cRect.left - dim.playerOffsetLeft)
+        event.clientY = Math.round(event.clientY - cRect.top - dim.playerOffsetTop)
+    }
 
-        // Ignore events outside the video element
-        if (x < 0 || x > dim.playerWidth ||
-            y < 0 || y > dim.playerHeight) {
-            return
+    /**
+     * The video displayed on the client might be stretched to fit its display.
+     * Because of this, local coordinates may not match the remote container.
+     * This method translates local coordinates so they fit the remote container
+     * @param event {PointerEvent}
+     * @private
+     */
+    _translateLocalCoordsToRemoteCoords(event) {
+        if (event.pointerType === 'touch') {
+            const pos = this._convertTouchInput(event.clientX, event.clientY);
+            event.clientX = pos.x;
+            event.clientY = pos.y
         }
 
-        const pos = this._coordConverter.convert(x, y, this._dimensions)
-        this._sendInputEvent('mouse-move', {
-            x: pos.x,
-            y: pos.y,
-            rx: event.movementX / this._dimensions.scalePercentage,
-            ry: event.movementY / this._dimensions.scalePercentage
-        });
-    };
+        // The video might be scaled up or down, so we translate the coordinates to take this
+        // scaling into account
+        event.clientX /= this._dimensions.scalePercentage;
+        event.clientY /= this._dimensions.scalePercentage;
 
-    _onMouseButton(event) {
-        const down = event.type === 'mousedown';
-        let button;
+        event.movementX = Math.round(event.movementX / this._dimensions.scalePercentage);
+        event.movementY = Math.round(event.movementY / this._dimensions.scalePercentage);
+    }
 
-        if (down && event.button === 0 && event.ctrlKey && event.shiftKey)
-            return;
+    /**
+     * onPointerEvent is called when a mouse or touch input is fired
+     * @param pointerEvent
+     * @private
+     */
+    _onPointerEvent(pointerEvent) {
+        pointerEvent.preventDefault()
 
-        switch (event.button) {
-            case 0: // no button
-                button = 1;
-                break;
-            case 1: // primary button (left click)
-                button = 2;
-                break;
-            case 2: // secondary button (right click)
-                button = 3;
-                break;
-            case 4: // auxiliary button (middle click usually)
-                button = 5;
-                break;
-            default:
-                console.error('Unknown mouse button', event.button)
-                return;
+        // The pointerEvent.pointerId increments every time when a new touch point
+        // is pressed(can be used to differentiate the touch point from others,
+        // However the downside of this is that it can not be used as the MT slot
+        // anymore and Android system can't handle the touch event with a slot
+        // larger than 10 (the max touch points supported by Android system).
+        // Hence we need to convert the pointerId to the MT slot index to ensure
+        // correct MT slot event forwarding to Android container.
+        const pointerId = Math.abs(pointerEvent.pointerId)
+        if (pointerEvent.isPrimary) {
+            this._primaryTouchId = pointerId
         }
 
-        this._sendInputEvent('mouse-button', {
-            button: button,
-            pressed: down
-        });
-    };
+        // JS events are read-only, so we create a clone of the event that
+        // we can modify down the road
+        const event = {
+            clientX: pointerEvent.clientX,
+            clientY: pointerEvent.clientY,
+            pointerId: pointerId - this._primaryTouchId,
+            pointerType: pointerEvent.pointerType,
+            type: pointerEvent.type,
+            button: pointerEvent.button,
+            movementX: pointerEvent.movementX,
+            movementY: pointerEvent.movementY,
+        }
+
+        if (this._options.controls.emulateTouch)
+            event.pointerType = 'touch';
+
+        // Transform pointer coordinates so (0,0) corresponds to the top left corner of the video
+        this._adjustPointerCoordsToVideoBoundaries(event)
+
+        if (this._isPointerEventOutOfBounds(event)) {
+            // In either of the following cases, ignore the events when
+            // they are out of bounds.
+            // a) If the feature `emulatePoitnerEvent` is disabled,
+            // b) If the feature `emulatePoitnerEvent` is enable, but the
+            //    pointer is in out of bounds state,
+            if (!this._options.experimental.emulatePointerEvent)
+                return
+
+            if (event.pointerId in this._pointersOutofBounds)
+                return
+
+            // Emulate the `pointerup` event when it's coordinate
+            // is out of bounds.
+            event.type = 'pointerup'
+
+            if (event.clientX < 0) {
+                event.clientX = 0
+            } else if (event.clientX > this._dimensions.playerWidth) {
+                event.clientX = this._dimensions.playerWidth
+            }
+            if (event.clientY < 0) {
+                event.clientY = 0
+            } else if (event.clientY > this._dimensions.playerHeight) {
+                event.clientY = this._dimensions.playerHeight
+            }
+
+            this._pointersOutofBounds[event.pointerId] = true
+        } else if (this._options.experimental.emulatePointerEvent &&
+              event.pointerId in this._pointersOutofBounds) {
+            // Replace the type of the event with 'pointerdown' if it comes
+            // to 'pointermove' event after the event with the type 'pointerup'
+            // is emulated previously.
+            if (event.type === 'pointermove')
+                event.type = 'pointerdown'
+
+            delete this._pointersOutofBounds[event.pointerId]
+        }
+
+        // Apply video scaling and rotation to the coordinates
+        this._translateLocalCoordsToRemoteCoords(event)
+
+        if (event.type === 'pointermove' && event.pointerType === 'touch')
+            this._sendInputEvent('touch-move', {
+                id: event.pointerId,
+                x: event.clientX,
+                y: event.clientY
+            })
+
+        else if (event.type === 'pointermove' && event.pointerType === 'mouse')
+            this._sendInputEvent('mouse-move', {
+                x: event.clientX,
+                y: event.clientY,
+                rx: event.movementX,
+                ry: event.movementY
+            })
+
+        else if (event.type === 'pointerdown' && event.pointerType === 'touch')
+            this._sendInputEvent('touch-start', {
+                id: event.pointerId,
+                x: event.clientX,
+                y: event.clientY,
+            })
+
+        else if (event.type === 'pointerdown' && event.pointerType === 'mouse') {
+            const button = this._getPressedButton(event)
+            if (button <= 0)
+                return
+            this._sendInputEvent('mouse-button', {
+                pressed: true,
+                button: button
+            })
+        }
+
+        else if ((event.type === 'pointerup' || event.type === 'pointercancel') && event.pointerType === 'touch')
+            this._sendInputEvent('touch-end', {
+                id: event.pointerId,
+            })
+
+        else if ((event.type === 'pointerup' || event.type === 'pointercancel') && event.pointerType === 'mouse') {
+            const button = this._getPressedButton(event)
+            if (button <= 0)
+                return
+            this._sendInputEvent('mouse-button', {
+                pressed: false,
+                button: button
+            })
+        }
+    }
 
     _onMouseWheel(event) {
         let move_step = (delta) => {
@@ -852,7 +1021,7 @@ class AnboxStream {
                 x: movex,
                 y: movey
             });
-    };
+    }
 
     _onKey(event) {
         // Disable any problematic browser shortcuts
@@ -928,115 +1097,55 @@ class AnboxStream {
                 });
             }
         }
-    };
-
-    _touchEvent(event, eventType) {
-        event.preventDefault();
-        const container = document.getElementById(this._containerID)
-        if (container === null)
-            throw new Error('invalid container')
-
-        for (let n = 0; n < event.changedTouches.length; n++) {
-            const touch = event.changedTouches[n]
-
-            let id = touch.identifier;
-            // FIXME: On iOS(Safari), unlike Chrome, each touch event has a fixed identifier (e.g 0, 1)
-            // to differentiate touch point when multiple touch events are processed at the same time,
-            // the touch.identifier on iOS is a unique natural number increase/decrease progressively,
-            // so it can be a negative/positive number/zero. However the input event to be sent to Android
-            // that bind with the id is ABS_MT_SLOT, which the minimum value of the ABS_MT_SLOT axis must
-            // be 0. In this case, we use the index instead, which could mess up touch sequence a bit
-            // on multi touches, but fix the broken touch input system.
-            if (id < 0 || id > this._maxTouchPoints - 1)
-                id = n
-
-            const dim = this._dimensions
-
-            const cRect = container.getBoundingClientRect();
-            const x = Math.round(touch.clientX - cRect.left - dim.playerOffsetLeft);
-            const y = Math.round(touch.clientY - cRect.top - dim.playerOffsetTop);
-
-            // Ignore events outside the video element
-            if (x < 0 || x > dim.playerWidth ||
-                y < 0 || y > dim.playerHeight) {
-                return
-            }
-
-            let radians = (Math.PI / 180) * this._currentRotation,
-                cos = Math.cos(radians),
-                sin = Math.sin(radians),
-                nx = Math.round((cos * x) + (sin * y)),
-                ny = Math.round((cos * y) - (sin * x));
-
-            let pos
-            switch (this._currentRotation) {
-                case 0:
-                    pos = this._coordConverter.convert(nx, ny, this._dimensions)
-                    break
-                case 90:
-                    ny += dim.playerWidth
-                    pos = this._coordConverter.convert(ny, nx, this._dimensions);
-                    [pos.x, pos.y] = [pos.y, pos.x]
-                    break
-                case 180:
-                    nx += dim.playerWidth
-                    ny += dim.playerHeight
-                    pos = this._coordConverter.convert(nx, ny, this._dimensions)
-                    break
-                case 270:
-                    nx += dim.playerHeight
-                    pos = this._coordConverter.convert(ny, nx, this._dimensions);
-                    [pos.x, pos.y] = [pos.y, pos.x]
-                    break
-            }
-
-            let e = {
-                x: pos.x,
-                y: pos.y,
-                id: id
-            }
-
-            if (eventType === "touch-move") {
-                // We should not fire the duplicated touch-move event as this will have a bad impact
-                // on Android input dispatching, which could cause ANR if the touched window's input
-                // channel is full.
-                if (this._updateTouchMoveEvent(e))
-                    this._sendInputEvent(eventType, e);
-            } else {
-                if (eventType === "touch-cancel" || eventType === "touch-end")
-                    this._lastTouchMoves = []
-                this._sendInputEvent(eventType, e);
-            }
-        }
-    };
-
-    _updateTouchMoveEvent(event) {
-        for (let lastMove of this._lastTouchMoves) {
-            if (lastMove.id === event.id) {
-                if (lastMove.x === event.x && lastMove.y === event.y)
-                    return false
-                lastMove.x = event.x
-                lastMove.y = event.y
-                return true
-            }
-        }
-
-        this._lastTouchMoves.push(event)
-        return true
     }
 
-    _onTouchStart(event) {
-        this._touchEvent(event, 'touch-start')
-    };
-    _onTouchEnd(event) {
-        this._touchEvent(event, 'touch-end')
-    };
-    _onTouchCancel(event) {
-        this._touchEvent(event, 'touch-cancel')
-    };
-    _onTouchMove(event) {
-        this._touchEvent(event, 'touch-move')
-    };
+    /**
+     * Touch inputs need some additional processing when the screen is rotated.
+     * This method transforms the X and Y coordinates of a touch input according
+     * to the current rotation
+     * The X and Y coordinates MUST be relative to the video, aka the various offsets
+     * of the container and video element should be substracted from the coordinates
+     * @param x {Number} raw X coordinate of the touch input (relative to the video element)
+     * @param y {Number} raw Y coordinate of the touch input (relative to the video element)
+     * @return coordinates {Object}
+     * @return coordinates.x {Number} updated X coordinate
+     * @return coordinates.y {Number} updated Y coordinate
+     * @private
+     */
+    _convertTouchInput(x, y) {
+        const dim = this._dimensions
+        if (!dim)
+            throw new Error('sdk is not ready yet')
+
+        if (this._currentRotation === 0)
+            return {x: x, y: y}
+
+        let radians = (Math.PI / 180) * this._currentRotation,
+            cos = Math.cos(radians),
+            sin = Math.sin(radians),
+            nx = Math.round((cos * x) + (sin * y)),
+            ny = Math.round((cos * y) - (sin * x));
+
+        switch (this._currentRotation) {
+            case 90:
+                ny += dim.playerWidth;
+                break
+            case 180:
+                nx += dim.playerWidth;
+                ny += dim.playerHeight;
+                break
+            case 270:
+                nx += dim.playerHeight;
+                break;
+        }
+
+        // We can sometimes have -0 as a coordinate which can cause some issues.
+        // To avoid this, we add +0 to have a positive 0
+        return {
+            x: nx + 0,
+            y: ny + 0
+        }
+    }
 
     _queryGamePadEvents() {
         if (!this._options.controls.gamepad)
@@ -1046,7 +1155,7 @@ class AnboxStream {
             this._gamepadManager = new _gamepadEventManager(this._sendInputEvent.bind(this));
             this._gamepadManager.startPolling();
         }
-    };
+    }
 
     _setVideoContainerFocused(enabled) {
         const videoContainer = document.getElementById(this._containerID);
@@ -1059,7 +1168,7 @@ class AnboxStream {
 
     _nullOrUndef(obj) {
         return obj === null || obj === undefined
-    };
+    }
 
     _stopStreamingOnError(errorMsg) {
         this._options.callbacks.error(new Error(errorMsg));
@@ -1078,15 +1187,20 @@ class AnboxStream {
         // when anbox ime is enabled and video container is editable,
         // there would be no text sent to the video container but to
         // Android container via our own private protocol.
+        // The IMEJSInterface is exposed from Android java layer(AnboxWebView)
+        // through JavaScript bridge, so suppress eslint rule for those lines.
+        // eslint-disable-next-line no-undef
         if (!this._nullOrUndef(IMEJSInterface)) {
             this._setVideoContainerFocused(visible);
             if (visible) {
+                // eslint-disable-next-line no-undef
                 IMEJSInterface.openVirtualKeyboard();
             } else {
+                // eslint-disable-next-line no-undef
                 IMEJSInterface.hideVirtualKeyboard();
             }
         }
-    };
+    }
 }
 
 class _gamepadEventManager {
@@ -1115,18 +1229,18 @@ class _gamepadEventManager {
 
         this._polling = true;
         this.tick();
-    };
+    }
 
     stopPolling() {
         if (this._polling === true)
             this._polling = false;
-    };
+    }
 
     tick() {
         this.queryEvents();
         if (this._polling)
             window.requestAnimationFrame(this.tick.bind(this));
-    };
+    }
 
     queryEvents() {
         let gamepads = navigator.getGamepads();
@@ -1179,9 +1293,9 @@ class _gamepadEventManager {
                                     });
                                     break;
                                 case k === this._dpad_remap_start_index: // DPAD left and right buttons
-                                    if (axes[k] === 0) {} else if (axes[k] === -1) {
+                                    if (axes[k] === -1) {
                                         dpad_button_index = this._dpad_standard_start_index + 2;
-                                    } else {
+                                    } else if (axes[k] !== 0) {
                                         dpad_button_index = this._dpad_standard_start_index + 3;
                                     }
 
@@ -1192,9 +1306,9 @@ class _gamepadEventManager {
                                     });
                                     break;
                                 case k === this._dpad_remap_start_index + 1: //  DPAD up and down buttons
-                                    if (axes[k] === 0) {} else if (axes[k] === -1) {
+                                    if (axes[k] === -1) {
                                         dpad_button_index = this._dpad_standard_start_index;
-                                    } else {
+                                    } else if (axes[k] !== 0){
                                         dpad_button_index = this._dpad_standard_start_index + 1;
                                     }
 
@@ -1214,7 +1328,7 @@ class _gamepadEventManager {
                 }
             }
         }
-    };
+    }
 
     cacheState(gamepad) {
         if (!gamepad)
@@ -1242,41 +1356,6 @@ class _gamepadEventManager {
 
         this._state[gamepad] = gamepadState;
     }
-}
-
-class _coordinateConverter {
-    /**
-     * convert will translate position from local events to position from remote container.
-     * @param pointerX {number} X position of the cursor on the video
-     * @param pointerY {number} Y position of the cursor on the video
-     * @param dimensions {object} Dimensions of the local viewport.
-     * @returns {x: number, y: number}
-     */
-    convert(pointerX, pointerY, dimensions) {
-        const x = this._clientToServerX(pointerX, dimensions);
-        const y = this._clientToServerY(pointerY, dimensions);
-        return {x: x, y: y}
-    };
-
-    _clientToServerX(clientX, dimensions) {
-        let serverX = Math.round(clientX / dimensions.scalePercentage)
-        if (serverX > dimensions.videoWidth)
-            serverX = dimensions.videoWidth
-        else if (serverX < 0)
-            serverX = 0
-
-        return serverX;
-    };
-
-    _clientToServerY(clientY, dimensions) {
-        let serverY = Math.round(clientY / dimensions.scalePercentage)
-        if (serverY > dimensions.videoHeight)
-            serverY = dimensions.videoHeight
-        else if (serverY < 0)
-            serverY = 0
-
-        return serverY;
-    };
 }
 
 const _keyScancodes = {
@@ -1780,7 +1859,7 @@ class AnboxWebRTCManager {
                 "credential": stun_servers[n].password
             });
         }
-    };
+    }
 
     _onWsOpen() {
         const config = {
@@ -1834,11 +1913,11 @@ class AnboxWebRTCManager {
 
         this._log('creating offer')
         this._createOffer();
-    };
+    }
 
     _onWsError(err) {
         this._onError('failed to communicate with the signaler', err);
-    };
+    }
 
     _onWsMessage(event) {
         const msg = JSON.parse(event.data);
@@ -1869,7 +1948,7 @@ class AnboxWebRTCManager {
             default:
                 console.error('Unknown message type ' + msg.type);
         }
-    };
+    }
 
     _createOffer() {
         let dummy_stream = this._createDummyStream();
@@ -1890,7 +1969,7 @@ class AnboxWebRTCManager {
         };
         if (this._ws.readyState === 1)
             this._ws.send(JSON.stringify(msg));
-    };
+    }
 
     _onControlMessageReceived(event) {
         const msg = JSON.parse(event.data);
@@ -1946,7 +2025,7 @@ class AnboxWebRTCManager {
             if (this._statsEnabled)
                 this._startStatsUpdater();
         }
-    };
+    }
 
     _onRtcIceConnectionStateChange() {
         if (this._pc === null)
@@ -2000,7 +2079,7 @@ class AnboxWebRTCManager {
             if (this._ws.readyState === 1)
                 this._ws.send(JSON.stringify(msg));
         }
-    };
+    }
 
     _createDummyStream() {
         // Create a dummy audio and video tracks before creating an offer
@@ -2166,6 +2245,13 @@ class AnboxWebRTCManager {
     }
 
     _processRawStats(stats) {
+
+         let bytes_to_mbits = (v, t) => {
+             if (isNaN(t))
+                 return 0
+             return v * 8 / 1000 / 1000 / t
+         }
+
         stats.forEach(report => {
             // mediaType is obsolete but kept for backward compatibility
             // https://www.w3.org/TR/webrtc-stats/#ref-for-dom-rtcrtpstreamstats-mediatype-1
@@ -2177,8 +2263,8 @@ class AnboxWebRTCManager {
                 v.jitter = report.jitter
                 v.avgJitterBufferDelay = report.jitterBufferDelay / report.jitterBufferEmittedCount
                 v.totalBytesReceived = report.bytesReceived
-                const timeDelta = Math.round(report.timestamp - (this._lastReport.video?.timestamp || report.timestamp - 1000))
-                v.bandwidthMbit = 8 * (report.bytesReceived - (this._lastReport.video?.bytesReceived || 0)) / timeDelta;
+                const elapsedInSec = Math.round((report.timestamp - (this._lastReport.video?.timestamp || report.timestamp - 1000)) / 1000.0)
+                v.bandwidthMbit = bytes_to_mbits(report.bytesReceived - (this._lastReport.video?.bytesReceived || 0), elapsedInSec)
                 this._lastReport.video = report
                 if (report.framesDecoded !== 0)
                     v.decodeTime = report.totalDecodeTime / report.framesDecoded;
@@ -2189,8 +2275,8 @@ class AnboxWebRTCManager {
                 a.packetsLost = report.packetsLost
                 a.packetsReceived = report.packetsReceived
                 a.jitter = report.jitter
-                const timeDelta = Math.round(report.timestamp - (this._lastReport.audioOutput?.timestamp || report.timestamp - 1000))
-                a.bandwidthMbit = 8 * (report.bytesReceived - (this._lastReport.audioOutput?.bytesReceived || 0)) / timeDelta
+                const elapsedInSec = Math.round((report.timestamp - (this._lastReport.audioOutput?.timestamp || report.timestamp - 1000)) / 1000.0)
+                a.bandwidthMbit = bytes_to_mbits(report.bytesReceived - (this._lastReport.audioOutput?.bytesReceived || 0), elapsedInSec)
                 a.totalBytesReceived = report.bytesReceived
                 this._lastReport.audioOutput = report
                 if (report.jitterBufferEmittedCount !== 0)
@@ -2199,8 +2285,8 @@ class AnboxWebRTCManager {
             } else if (report.type === 'outbound-rtp' && (report.kind === 'audio' || report.mediaType === 'audio')) {
                 let a = this._stats.audioInput
                 a.totalBytesSent = report.bytesSent
-                const timeDelta = Math.round(report.timestamp - (this._lastReport.audioInput?.timestamp || report.timestamp - 1000))
-                a.bandwidthMbit = 8 * (report.bytesSent - (this._lastReport.audioInput?.bytesSent || 0)) / timeDelta
+                const elapsedInSec = Math.round((report.timestamp - (this._lastReport.audioInput?.timestamp || report.timestamp - 1000)) / 1000.0)
+                a.bandwidthMbit = bytes_to_mbits(report.bytesSent - (this._lastReport.audioInput?.bytesSent || 0), elapsedInSec)
                 this._lastReport.audioInput = report
 
             } else if (report.type === 'candidate-pair' && report.nominated && report.state === "succeeded") {
@@ -2246,7 +2332,7 @@ class AnboxWebRTCManager {
             overlay.appendChild(lineBreak);
         };
 
-        const mbits_format = (v) => (v * 8 / 1000 / 1000).toFixed(2) + " Mbit/s"
+        const mbits_format = (v) => v.toFixed(2) + " Mbit/s"
         const mb_format = (v) => (v / 1000 / 1000).toFixed(2) + " MB"
         const ms_format = (v) => (v * 1000).toFixed(2) + " ms"
 
@@ -2293,7 +2379,7 @@ class AnboxWebRTCManager {
 class AnboxStreamGatewayConnector {
     _nullOrUndef(obj) {
         return obj === null || obj === undefined
-    };
+    }
 
     /**
      * Connector for the Anbox Stream Gateway. If no connector is specified for
@@ -2379,7 +2465,7 @@ class AnboxStreamGatewayConnector {
         } else {
             return await this._joinSession();
         }
-    };
+    }
 
     async _createSession() {
         try {
@@ -2429,7 +2515,7 @@ class AnboxStreamGatewayConnector {
             websocket: response.metadata.url,
             stunServers: response.metadata.stun_servers
         };
-    };
+    }
 
     async _joinSession() {
         const rawJoinResp = await fetch(
