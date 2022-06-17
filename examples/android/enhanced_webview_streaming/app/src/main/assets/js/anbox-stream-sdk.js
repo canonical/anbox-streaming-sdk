@@ -343,7 +343,7 @@ class AnboxStream {
             throw new Error("invalid gps data format")
         }
 
-        this._webrtcManager.sendControlMessage("location::update-position", update);
+        return this._webrtcManager.sendControlMessage("location::update-position", update);
     }
 
     _detectUnsupportedBrowser() {
@@ -509,13 +509,14 @@ class AnboxStream {
     }
 
     _stopStreaming() {
-        this._webrtcManager.stop();
         this._unregisterControls();
-        this._removeMedia();
-
         if (this._gamepadManager) {
             this._gamepadManager.stopPolling()
         }
+
+        this._webrtcManager.stop();
+        this._removeMedia();
+
         this._options.callbacks.done()
     }
 
@@ -563,14 +564,14 @@ class AnboxStream {
         const data = {
             text: text
         }
-        this._sendIMEMessage(_imeEventType.Text, data)
+        return this._sendIMEMessage(_imeEventType.Text, data)
     }
 
     sendIMEComposingText(text) {
         const data = {
             text: text
         }
-        this._sendIMEMessage(_imeEventType.ComposingText, data)
+        return this._sendIMEMessage(_imeEventType.ComposingText, data)
     }
 
     sendIMETextDeletion(counts) {
@@ -578,7 +579,7 @@ class AnboxStream {
             return;
 
         const _android_KEYCODE_DEL = 67
-        this._sendIMECode(_android_KEYCODE_DEL, counts);
+        return this._sendIMECode(_android_KEYCODE_DEL, counts);
     }
 
     sendIMEAction(name, params) {
@@ -596,7 +597,7 @@ class AnboxStream {
             name: name,
             params: params
         }
-        this._sendIMEMessage(_imeEventType.Action, data);
+        return this._sendIMEMessage(_imeEventType.Action, data);
     }
 
     sendIMEComposingRegion(start, end) {
@@ -606,7 +607,7 @@ class AnboxStream {
             start: start,
             end: end
         }
-        this._sendIMEMessage(_imeEventType.ComposingRegion, data);
+        return this._sendIMEMessage(_imeEventType.ComposingRegion, data);
     }
 
     _unregisterControls() {
@@ -647,8 +648,8 @@ class AnboxStream {
      * rotate the video element to a given orientation
      * @param orientation {string} Desired orientation. Can be 'portrait', 'landscape', 'reverse-portrait', 'reverse-landscape'
      *                             No-op if already in the given orientation
-     * @throws {Error} Invalid orientation given
-     * @throws {Error} SDK is not ready yet
+     * Returns true if the video element is rotated successfully, otherwise returns false
+     * @returns {boolean}
      */
     rotate(orientation) {
         switch (orientation) {
@@ -658,27 +659,33 @@ class AnboxStream {
             case 'reverse-landscape':
                 break
             default:
-                throw new Error("invalid orientation given")
+                console.error("invalid orientation given")
+                return false
         }
 
         const dim = this._dimensions
-        if (!dim)
-            throw new Error('SDK not ready')
+        if (!dim) {
+            console.error('SDK not ready')
+            return false
+        }
 
         if (orientation === this._currentOrientation) {
             console.log('video element already in requested orientation', orientation)
-            return;
+            return false
         }
 
-        this._webrtcManager.sendControlMessage("screen::change_orientation", {
-            orientation: orientation
-        })
+        const data ={ orientation: orientation }
+        if (!this._webrtcManager.sendControlMessage("screen::change_orientation", data)) {
+            console.error('failed to send orientation message')
+            return false
+        }
 
         this._currentOrientation = orientation
         this._currentRotation = this._orientationToDegrees(this._originalOrientation, orientation)
 
         document.getElementById(this._videoID).style.transform = `rotate(${this._currentRotation}deg)`
         this._onResize()
+        return true
     }
 
     getCurrentOrientation() {
@@ -783,7 +790,7 @@ class AnboxStream {
     }
 
     _sendInputEvent(type, data) {
-        this._webrtcManager.sendControlMessage('input::' + type, data);
+        return this._webrtcManager.sendControlMessage('input::' + type, data);
     }
 
     _sendIMECode(code, times) {
@@ -791,7 +798,7 @@ class AnboxStream {
             code: code,
             times: times
         }
-        this._sendIMEMessage(_imeEventType.Keycode, data)
+        return this._sendIMEMessage(_imeEventType.Keycode, data)
     }
 
     _sendIMEMessage(imeEventType, imeData) {
@@ -799,7 +806,7 @@ class AnboxStream {
             type: imeEventType,
             data: imeData
         }
-        this._webrtcManager.sendControlMessage('input::ime-event', data)
+        return this._webrtcManager.sendControlMessage('input::ime-event', data)
     }
 
     /**
@@ -1829,12 +1836,13 @@ class AnboxWebRTCManager {
      */
     sendControlMessage(type, data) {
         if (this._controlChan === null || this._controlChan.readyState !== 'open') {
-            throw new Error('control channel not open yet')
+            return false
         }
         this._controlChan.send(JSON.stringify({
             type: type,
             data: data
         }));
+        return true
     }
 
     _log(msg) {
