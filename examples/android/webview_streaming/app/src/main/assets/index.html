@@ -26,16 +26,16 @@
         session: {
             app: Android.getAppName(),
         },
+        screen: {
+          width: 1280,
+          height: 720,
+          fps: 25,
+        }
     });
 
     let stream = new AnboxStream({
         connector: connector,
         targetElement: "anbox-stream",
-        screen: {
-            width: 1280,
-            height: 720,
-            fps: 25,
-        },
         controls: {
           mouse: true,
         },

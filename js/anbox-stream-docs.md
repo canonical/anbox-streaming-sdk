@@ -34,10 +34,38 @@ Include the script
 Create a node element with an ID
 
 ```html
-<div id="anbox-stream"></div>
+<div id="anbox-stream" style="width: 100vw; height: 100vh;"></div>
 ```
 
-and create a stream instance
+create a stream gateway connector.
+
+```javascript
+/**
+ * AnboxStreamGatewayConnector enables communication between the client and the
+ * gateway. They can be customized to add an additional layer between
+ * the client and the gateway in order to add more features (user management,
+ * limits, analytics, etc).
+ * For instance, to add user management, you would create a connector that
+ * would communicate with a service you own, which in turn would talk to the
+ * stream gateway to create an actual streaming session.
+ * The connector would pass that session information to the SDK which takes
+ * care of the rest.
+ */
+const connector = new AnboxStreamGatewayConnector({
+    url: '<stream_gateway_address>',
+    authToken: '<stream_gateway_auth_token>',
+    session: {
+        app: '<app_name>',
+    },
+    screen: {
+        width: 1280,
+        height: 720,
+        fps: 25,
+    }
+});
+```
+
+create a stream instance with the initialized connector, which is used to connect the stream gateway to start streaming.
 
 ```javascript
 /**
@@ -45,46 +73,32 @@ and create a stream instance
  * displays its video & audio feed in an HTML5 player
  *
  * @param options: {object} {
- *       targetElement: ID of the DOM element to attach the video to. (required)
- *       url: Address of the service. (required)
- *       authToken: Authentication token acquired through /1.0/login (required)
- *       stunServers: List ICE servers (default: [{"urls": ['stun:stun.l.google.com:19302'], username: "", password: ""}])
- *       session: {
- *           app: Android application ID or name. (required)
- *       },
- *       screen: {
- *           width: screen width (default: 1280)
- *           height: screen height (default: 720)
- *           fps: screen frame rate (default: 60)
- *           density: screen density (default: 240)
- *       },
- *       controls: {
- *          keyboard: true or false, send keypress events to the Android instance. (default: true)
- *          mouse: true or false, send mouse and touch events to the Android instance. (default: true)
- *          gamepad: true or false, send gamepad events to the Android instance. (default: true)
- *      },
- *      callbacks: {
- *          ready: function, called when the video and audio stream are ready to be inserted. (default: none)
- *          error: function, called on stream error with the message as parameter. (default: none)
- *          done: function, called when the stream is closed. (default: none)
- *      },
- *      experimental: {
- *          disableBrowserBlock: don't throw an error if an unsupported browser is detected. (default: false)
- *      }
+ *     connector: WebRTC Stream connector.
+ *     targetElement: ID of the DOM element to attach the video to. (required)
+ *     url: Address of the service. (required)
+ *     authToken: Authentication token acquired through /1.0/login (required)
+ *     stunServers: List ICE servers (default: [{"urls": ['stun:stun.l.google.com:19302'], username: "", password: ""}])
+ *     controls: {
+ *        keyboard: true or false, send keypress events to the Android instance. (default: true)
+ *        mouse: true or false, send mouse and touch events to the Android instance. (default: true)
+ *        gamepad: true or false, send gamepad events to the Android instance. (default: true)
+ *     },
+ *     callbacks: {
+ *        ready: function, called when the video and audio stream are ready to be inserted. (default: none)
+ *        error: function, called on stream error with the message as parameter. (default: none)
+ *        done: function, called when the stream is closed. (default: none)
+ *     },
+ *     experimental: {
+ *        disableBrowserBlock: don't throw an error if an unsupported browser is detected. (default: false)
+ *     }
  *   }
  */
 
 let stream = new AnboxStream({
+    connector: connector,
     targetElement: "anbox-stream",
     url: config.backendAddress,
     authToken: "abc123",
-    session: {
-        app: "some-application-name",
-    },
-    screen: {
-        width: 720,
-        height: 1280,
-    },
     callbacks: {
         ready: () => { console.log('video stream is ready') },
         error: (e) => { console.log('an error occurred:', e) },

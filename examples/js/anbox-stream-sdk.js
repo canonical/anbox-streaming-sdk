@@ -1,6 +1,8 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
+ * Version: 1.15.0
+ *
  * Copyright 2021 Canonical Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,6 +27,9 @@ class AnboxStream {
      * @param [options.fullScreen] {boolean} Stream video in full screen mode. (default: false)
      * @param [options.deviceType] {string} Send the type of device the SDK is running on to the Android container.
      * @param [options.enableStats] {boolean} Enable collection of statistics. Not recommended in production.
+     * @param [options.stream] {object} Configuration settings for the streaming.
+     * @param [options.stream.video=true] {boolean} Enable video stream when starting streaming.
+     * @param [options.stream.audio=true] {boolean} Enable audio stream when starting streaming.
      * @param [options.stunServers] {object[]} List of additional STUN/TURN servers.
      * @param [options.stunServers[].urls] {string[]} URLs the same STUN/TURN server can be reached on.
      * @param [options.stunServers[].username] {string} Username used when authenticating with the STUN/TURN server.
@@ -47,6 +52,12 @@ class AnboxStream {
      * @param [options.callbacks.statsUpdated=none] {function} Called when the overall webrtc peer connection statistics are updated.
      * @param [options.callbacks.requestCameraAccess=none] {function} Called when Android application tries to open camera device for video streaming.
      * @param [options.callbacks.requestMicrophoneAccess=none] {function} Called when Android application tries to open microphone device for video streaming.
+     * @param [options.dataChannels] {object} Map of data channels used to exchange out of band data between WebRTC client and application running in Android container.
+     * @param [options.dataChannels[name].callbacks] {object} A list of event handling callbacks of one specific data channel.
+     * @param [options.dataChannels[name].callbacks.open=none] {function} A callback function that is triggered when the data channel is opened.
+     * @param [options.dataChannels[name].callbacks.message=none] {function} A callback function that is triggered when a message has been received from the remote peer.
+     * @param [options.dataChannels[name].callbacks.close=none] {function} A callback function that is triggered when the data channel has closed.
+     * @param [options.dataChannels[name].callbacks.error=none] {function} A callback function that is triggered when an error occurs on the data channel.
      * @param [options.experimental] {object} Experimental features. Not recommended on production.
      * @param [options.experimental.disableBrowserBlock=false] {boolean} Don't throw an error if an unsupported browser is detected.
      * @param [options.experimental.emulatePointerEvent=false] {boolean} Emulate pointer events when their coordinates are outside of the video element.
@@ -73,7 +84,10 @@ class AnboxStream {
             enableSpeakers: this._options.devices.speaker,
             enableMic: this._options.devices.microphone,
             enableCamera: this._options.devices.camera,
+            enableAudioStream: this._options.stream.audio,
+            enableVideoStream: this._options.stream.video,
             deviceType: this._options.deviceType,
+            dataChannels: this._options.dataChannels,
             foregroundActivity: this._options.foregroundActivity,
             stats: {
                 overlayID: this._containerID,
@@ -384,6 +398,15 @@ class AnboxStream {
         if (this._nullOrUndef(options.controls.gamepad))
             options.controls.gamepad = true;
 
+        if (this._nullOrUndef(options.stream))
+            options.stream = {};
+
+        if (this._nullOrUndef(options.stream.video))
+            options.stream.video = true;
+
+        if (this._nullOrUndef(options.stream.audio))
+            options.stream.audio = true;
+
         if (this._nullOrUndef(options.stunServers))
             options.stunServers = [];
 
@@ -407,6 +430,25 @@ class AnboxStream {
 
         if (this._nullOrUndef(options.callbacks.requestMicrophoneAccess))
             options.callbacks.requestMicrophoneAccess = () => false
+
+        if (!this._nullOrUndef(options.dataChannels)) {
+            if (Object.keys(options.dataChannels).length > maxNumberOfDataChannels)
+                throw new Error('exceeds the maximum allowed length of data channels');
+
+            Object.keys(options.dataChannels).forEach((name) => {
+                if (this._nullOrUndef(options.dataChannels[name].callbacks))
+                    options.dataChannels[name].callbacks = {};
+                if (this._nullOrUndef(options.dataChannels[name].callbacks.open))
+                    options.dataChannels[name].callbacks.open = {}
+                if (this._nullOrUndef(options.dataChannels[name].callbacks.close))
+                    options.dataChannels[name].callbacks.close = {}
+                if (this._nullOrUndef(options.dataChannels[name].callbacks.error))
+                    options.dataChannels[name].callbacks.error = {}
+                if (this._nullOrUndef(options.dataChannels[name].callbacks.message))
+                    options.dataChannels[name].callbacks.message = {}
+            });
+        } else
+            options.dataChannels = {};
 
         if (this._nullOrUndef(options.foregroundActivity))
             options.foregroundActivity = "";
@@ -433,8 +475,11 @@ class AnboxStream {
     _validateOptions(options) {
         if (this._nullOrUndef(options.targetElement))
             throw new Error('missing targetElement parameter');
-        if (document.getElementById(options.targetElement) === null)
+        const container = document.getElementById(options.targetElement)
+        if (container === null)
             throw new Error(`target element "${options.targetElement}" does not exist`);
+        else if (container.clientWidth == 0 || container.clientHeight == 0)
+            console.error("AnboxStream: video container element misses size. Please see https://anbox-cloud.io/docs/howto/stream/web-client")
 
         if (this._nullOrUndef(options.connector))
             throw new Error('missing connector');
@@ -457,27 +502,29 @@ class AnboxStream {
         // Disable native controls for touch events (zooming, panning)
         mediaContainer.style.touchAction = 'none';
 
-        const video = document.createElement('video');
-        video.style.margin = "0";
-        video.style.height = "auto";
-        video.style.width = "auto";
-        // The video element is sized based on the dimensions of its container. Settings its position to "absolute"
-        // removes it from the flow, so the video element cannot change its parent dimensions.
-        video.style.position = 'absolute';
-        video.muted = true;
-        video.autoplay = true;
-        video.controls = false;
-        video.id = this._videoID;
-        video.playsInline = true;
-        // Disable context menu so we can properly handle right clicks on the video
-        video.setAttribute('oncontextmenu', 'return false;')
-        video.onplay = () => {
-            this._onResize()
-            this._registerControls();
-        };
-        mediaContainer.appendChild(video);
+        if (this._options.stream.video) {
+            const video = document.createElement('video');
+            video.style.margin = "0";
+            video.style.height = "auto";
+            video.style.width = "auto";
+            // The video element is sized based on the dimensions of its container. Settings its position to "absolute"
+            // removes it from the flow, so the video element cannot change its parent dimensions.
+            video.style.position = 'absolute';
+            video.muted = true;
+            video.autoplay = true;
+            video.controls = false;
+            video.id = this._videoID;
+            video.playsInline = true;
+            // Disable context menu so we can properly handle right clicks on the video
+            video.setAttribute('oncontextmenu', 'return false;')
+            video.onplay = () => {
+                this._onResize()
+                this._registerControls();
+            };
+            mediaContainer.appendChild(video);
+        }
 
-        if (this._options.devices.speaker) {
+        if (this._options.stream.audio && this._options.devices.speaker) {
             const audio = document.createElement('audio');
             audio.id = this._audioID;
             audio.autoplay = true;
@@ -487,10 +534,12 @@ class AnboxStream {
     }
 
     _webrtcReady(videoSource, audioSource) {
-        const video = document.getElementById(this._videoID);
-        video.srcObject = videoSource;
+        if (this._options.stream.video) {
+            const video = document.getElementById(this._videoID);
+            video.srcObject = videoSource;
+        }
 
-        if (this._options.devices.speaker) {
+        if (this._options.stream.audio && this._options.devices.speaker) {
             const audio = document.getElementById(this._audioID);
             audio.srcObject = audioSource;
         }
@@ -608,6 +657,10 @@ class AnboxStream {
             end: end
         }
         return this._sendIMEMessage(_imeEventType.ComposingRegion, data);
+    }
+
+    sendData(channelName, data) {
+        return this._webrtcManager.sendData(channelName, data)
     }
 
     _unregisterControls() {
@@ -1365,6 +1418,8 @@ class _gamepadEventManager {
     }
 }
 
+const maxNumberOfDataChannels = 5
+
 const _keyScancodes = {
     KeyA: 4,
     KeyB: 5,
@@ -1483,6 +1538,8 @@ class AnboxWebRTCManager {
      * @param [options.enableSpeakers=true] {boolean} Enable speakers
      * @param [options.enableMic=false] {boolean} Enable microphone
      * @param [options.enableCamera=false] {boolean} Enable camera
+     * @param [options.enableAudioStream=true] {boolean} Enable audio stream only when peer connection is established.
+     * @param [options.enableVideoStream=true] {boolean} Enable video stream only when peer connection is established.
      * @param [options.deviceType] {string} Indicate the type of the device the SDK is running on
      * @param [options.foregroundActivity] {string} Activity to be displayed in the foreground. NOTE: it only works with an application that has APK provided on its creation.
      * @param [options.stats] {Object}
@@ -1494,6 +1551,7 @@ class AnboxWebRTCManager {
         this._ws = null
         this._pc = null
         this._controlChan = null
+        this._dataChans = []
         this._stunServers = []
 
         // Timer global to the whole signaling process
@@ -1507,13 +1565,30 @@ class AnboxWebRTCManager {
         this._audioInputStream = null;
         this._videoInputStream = null;
 
+        this._stream = {
+            video: options.enableVideoStream,
+            audio: options.enableAudioStream
+        }
+
         this._userMedia = {}
-        this._userMedia.speakers = options.enableSpeakers || true;
-        this._userMedia.mic = options.enableMic || false;
-        this._userMedia.camera = options.enableCamera || false;
+        if (this._stream.video) {
+            this._userMedia.camera = options.enableCamera || false;
+        } else {
+            this._userMedia.camera = false;
+        }
+
+        if (this._stream.audio) {
+            this._userMedia.speakers = options.enableSpeakers || true;
+            this._userMedia.mic = options.enableMic || false;
+        } else {
+            this._userMedia.speakers = false;
+            this._userMedia.mic = false;
+        }
 
         this._deviceType = options.deviceType || '';
         this._foregroundActivity = options.foregroundActivity || '';
+
+        this._dataChannels = options.dataChannels
 
         this._startTimer = performance.now()
         this._statsEnabled = options.stats?.enable || false
@@ -1542,7 +1617,15 @@ class AnboxWebRTCManager {
                 jitter: 0,
                 avgJitterBufferDelay: 0,
                 packetsReceived: 0,
-                packetsLost: 0
+                packetsLost: 0,
+                framesDropped: 0,
+                framesDecoded: 0,
+                framesReceived: 0,
+                keyFramesDecoded: 0,
+                pliCount: 0,
+                firCount: 0,
+                nackCount: 0,
+                qpSum: 0,
             },
             audioOutput: {
                 bandwidthMbit: 0,
@@ -1702,6 +1785,10 @@ class AnboxWebRTCManager {
         window.clearTimeout(this._disconnectedTimeout);
         window.clearInterval(this._statsTimerId)
 
+        this._dataChans.forEach((channel) => {
+            channel.stop()
+        });
+
         // Notify the other side that we're disconnecting to speed up potential reconnects
         // NOTE: do not send a control message if the data channel is not created yet.
         //       E.g. a peer connection is not established at all.
@@ -1845,6 +1932,23 @@ class AnboxWebRTCManager {
         return true
     }
 
+    /**
+     * Send an out of band data message to the Android container
+     * @param type {string} Channel name
+     * @param data {Object} Data to transmit across the connection
+     */
+    sendData(channelName, data) {
+        if (!(channelName in this._dataChans))
+            return false
+
+        if (this._dataChans[channelName] === null ||
+            this._dataChans[channelName].readyState !== 'open')
+            return false
+
+        this._dataChans[channelName].send(data);
+        return true
+    }
+
     _log(msg) {
         if (!this._debugEnabled)
             return
@@ -1879,29 +1983,35 @@ class AnboxWebRTCManager {
         this._pc.onicecandidate = this._onRtcIceCandidate.bind(this);
 
         let audio_direction = 'inactive'
-        if (this._userMedia.speakers) {
-            if (this._userMedia.mic)
-                audio_direction = 'sendrecv'
-            else
-                audio_direction = 'recvonly'
+        if (this._stream.audio) {
+            if (this._userMedia.speakers) {
+                if (this._userMedia.mic)
+                    audio_direction = 'sendrecv'
+                else
+                    audio_direction = 'recvonly'
+            }
         }
         this._pc.addTransceiver('audio', {
             direction: audio_direction
         })
 
-        if (this._userMedia.camera) {
-            this._pc.addTransceiver('video', {
-                direction: 'sendonly'
-            })
-        }
+        let video_direction = 'inactive'
+        if (this._stream.video) {
+            video_direction = 'recvonly'
 
+            if (this._userMedia.camera) {
+                this._pc.addTransceiver('video', {
+                    direction: 'sendonly'
+                })
+            }
+        }
         this._pc.addTransceiver('video', {
-            direction: 'recvonly'
+            direction: video_direction
         })
-        this._controlChan = this._pc.createDataChannel('control');
-        this._controlChan.onmessage = this._onControlMessageReceived.bind(this);
-        this._controlChan.onerror = (err) => this._onError('error on control channel', err);
-        this._controlChan.onclose = () => this._log('control channel is closed');
+
+        this._createControlChannel()
+
+        this._createDataChannels()
 
         if (this._deviceType.length > 0) {
             let msg = {
@@ -1923,8 +2033,26 @@ class AnboxWebRTCManager {
         this._createOffer();
     }
 
-    _onWsError(err) {
-        this._onError('failed to communicate with the signaler', err);
+    _createControlChannel() {
+        this._controlChan = this._pc.createDataChannel('control');
+        this._controlChan.onmessage = this._onControlMessageReceived.bind(this);
+        this._controlChan.onerror = (err) => this._onError(`error on control channel: ${err.error.message}`);
+        this._controlChan.onclose = () => this._log('control channel is closed');
+    }
+
+    _createDataChannels() {
+        Object.keys(this._dataChannels).forEach((name) => {
+            let channel = this._pc.createDataChannel(name);
+            channel.onmessage = (event) => this._dataChannels[name].callbacks.message(event.data);
+            channel.onerror = (err) => this._dataChannels[name].callbacks.error(err.error.message);
+            channel.onclose = () => this._dataChannels[name].callbacks.close();
+            channel.onopen = () => this._dataChannels[name].callbacks.open();
+            this._dataChans[name] = channel
+        });
+    }
+
+    _onWsError(event) {
+        this._onError(`failed to communicate with the signaler: ${event.data}`);
     }
 
     _onWsMessage(event) {
@@ -1973,7 +2101,8 @@ class AnboxWebRTCManager {
         this._pc.setLocalDescription(description);
         let msg = {
             type: 'offer',
-            sdp: btoa(description.sdp)
+            sdp: btoa(description.sdp),
+            dataChannels: Object.keys(this._dataChannels)
         };
         if (this._ws.readyState === 1)
             this._ws.send(JSON.stringify(msg));
@@ -2027,8 +2156,12 @@ class AnboxWebRTCManager {
             this._audioStream.onremovetrack = this._onClose;
         }
 
-        // Prevent streaming until both audio and video tracks are available
-        if (this._videoStream && (!this._userMedia.speakers || this._audioStream)) {
+        const audioOnly = !this._stream.video && this._stream.audio;
+        const videoOnly = this._stream.video && !this._stream.audio;
+        // Prevent streaming until regardind tracks are available
+        if ((audioOnly && this._audioStream) ||
+            (videoOnly && this._videoStream) ||
+            (this._videoStream && (!this._userMedia.speakers || this._audioStream))) {
             this._onReady(this._videoStream, this._audioStream);
             if (this._statsEnabled)
                 this._startStatsUpdater();
@@ -2069,6 +2202,16 @@ class AnboxWebRTCManager {
                 window.clearTimeout(this._disconnectedTimeout);
                 window.clearTimeout(this._signalingTimeout);
                 this._ws.close();
+
+                // When streaming with no audio and video, once the peer connection is
+                // connected (where no track is going to be added to the peer connection),
+                // instead of relying on RTCPeerConnection.ontrack callback function, we
+                // should now fire the signal here to notify the caller that the stream is ready.
+                if (!this._stream.video && !this._stream.audio) {
+                    this._onReady(this._videoStream, this._audioStream);
+                    if (this._statsEnabled)
+                        this._startStatsUpdater();
+                }
                 break;
 
             default:
@@ -2269,6 +2412,14 @@ class AnboxWebRTCManager {
                 v.packetsLost = report.packetsLost
                 v.packetsReceived = report.packetsReceived
                 v.jitter = report.jitter
+                v.framesDropped = report.framesDropped
+                v.framesDecoded = report.framesDecoded
+                v.framesReceived = report.framesReceived
+                v.keyFramesDecoded = report.keyFramesDecoded
+                v.pliCount = report.pliCount
+                v.firCount = report.firCount
+                v.nackCount = report.nackCount
+                v.qpSum = report.qpSum
                 v.avgJitterBufferDelay = report.jitterBufferDelay / report.jitterBufferEmittedCount
                 v.totalBytesReceived = report.bytesReceived
                 const elapsedInSec = Math.round((report.timestamp - (this._lastReport.video?.timestamp || report.timestamp - 1000)) / 1000.0)
@@ -2372,6 +2523,14 @@ class AnboxWebRTCManager {
         insertStat("avgJitterBufferDelay", ms_format(this._stats.video.avgJitterBufferDelay))
         insertStat("packetsReceived", this._stats.video.packetsReceived)
         insertStat("packetsLost", this._stats.video.packetsLost)
+        insertStat("framesDropped", this._stats.video.framesDropped)
+        insertStat("framesDecoded", this._stats.video.framesDecoded)
+        insertStat("framesReceived", this._stats.video.framesReceived)
+        insertStat("keyFramesDecoded", this._stats.video.keyFramesDecoded)
+        insertStat("pliCount", this._stats.video.pliCount)
+        insertStat("firCount", this._stats.video.firCount)
+        insertStat("nackCount", this._stats.video.nackCount)
+        insertStat("qpSum", this._stats.video.qpSum)
 
         insertHeader("Audio Output")
         insertStat("bandWidth", mbits_format(this._stats.audioOutput.bandwidthMbit))

@@ -25,6 +25,11 @@
         session: {
             app: "com.foo.bar",
         },
+        screen: {
+            width: 1280,
+            height: 720,
+            fps: 25,
+        }
     });
 
     // The AnboxStream class takes care of the WebRTC signaling process as
@@ -32,11 +37,6 @@
     let stream = new AnboxStream({
         connector: connector,
         targetElement: "anbox-stream",
-        screen: {
-            width: 1280,
-            height: 720,
-            fps: 25,
-        },
         controls: {
             keyboard: true
         },
@@ -57,6 +57,6 @@
 </script>
     <h1>Anbox Streaming Stack example</h1>
     <button onclick="window.startStream()">Start</button>
-    <div id="anbox-stream"></div>
+    <div id="anbox-stream" style="width: 100vw; height: 100vh;"></div>
 </body>
 </html>
