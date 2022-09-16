@@ -1,7 +1,7 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
- * Version: 1.15.0
+ * Version: 1.15.1
  *
  * Copyright 2021 Canonical Ltd.
  *
@@ -1792,8 +1792,10 @@ class AnboxWebRTCManager {
         // Notify the other side that we're disconnecting to speed up potential reconnects
         // NOTE: do not send a control message if the data channel is not created yet.
         //       E.g. a peer connection is not established at all.
-        if (this._controlChan !== null)
+        if (this._controlChan !== null) {
             this.sendControlMessage("stream::disconnect", {});
+            this._controlChan = null
+        }
 
         if (this._ws !== null) {
             this._ws.close()
@@ -2036,7 +2038,7 @@ class AnboxWebRTCManager {
     _createControlChannel() {
         this._controlChan = this._pc.createDataChannel('control');
         this._controlChan.onmessage = this._onControlMessageReceived.bind(this);
-        this._controlChan.onerror = (err) => this._onError(`error on control channel: ${err.error.message}`);
+        this._controlChan.onerror = (err) => { if (this._controlChan !== null) this._onError(`error on control channel: ${err.error.message}`);}
         this._controlChan.onclose = () => this._log('control channel is closed');
     }
 
