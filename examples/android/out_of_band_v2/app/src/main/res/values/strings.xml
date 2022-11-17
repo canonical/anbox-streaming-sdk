@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Out of band v2</string>
+    <string name="connect_button">Connect</string>
+    <string name="send_button">Send</string>
+    <string name="channel_name_hint">Channel name</string>
+    <string name="received_data_hint">Received data</string>
+    <string name="send_data_hint">Text to be sent</string>
+</resources>

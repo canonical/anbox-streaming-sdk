@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.canonical.anboxcloud.outofbandappv2"
+    android:sharedUserId="android.uid.system">
+
+    <!--
+      NOTE:
+      1. To access the Anbox WebRTC Data Proxy service from the Android app,
+         the app must be installed as a system app, which its user ID must
+         be "android.uid.system"
+      2. To install the app as a system app in the Android container, one must
+         declare `allow_custom_system_signatures` in the /var/lib/anbox/features file.
+    -->
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.TimeZone">
+        <activity
+            android:name=".MainActivity"
+            android:launchMode="singleTop"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
