@@ -1,7 +1,7 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
- * Version: 1.16.0
+ * Version: 1.17.0
  *
  * Copyright 2021 Canonical Ltd.
  *
@@ -188,7 +188,7 @@ class AnboxStream {
    *   packetsLost: Total number of packets lost.
    * network: Information about the network and WebRTC connections.
    *   currentRtt: Current round trip time in seconds.
-   *   networkType: Type of network in use. Can be one of the following:
+   *   networkType: Type of network in use (NOTE: It's deprecated to preserve the privacy). Can be one of the following:
    *       bluetooth: This connection uses bluetooth.
    *       celullar: The connection uses a cellular data service to connect. This includes all cellular data services including EDGE (2G), HSPA (3G), LTE (4G), and NR (5G).
    *       ethernet: This connection uses an ethernet network.
@@ -1644,6 +1644,8 @@ class AnboxWebRTCManager {
     this._controlChan = null;
     this._dataChans = [];
     this._stunServers = [];
+    this._pendingCandidates = [];
+    this._appliedRemoteDescription = false;
 
     // Timer global to the whole signaling process
     this._signalingTimeout = null;
@@ -1695,7 +1697,7 @@ class AnboxWebRTCManager {
       },
       network: {
         currentRtt: 0,
-        networkType: "",
+        networkType: "unknown",
         transportType: "",
         localCandidateType: "",
         remoteCandidateType: "",
@@ -1962,7 +1964,7 @@ class AnboxWebRTCManager {
    *   packetsLost: Total number of packets lost.
    * network: Information about the network and WebRTC connections.
    *   currentRtt: Current round trip time in seconds.
-   *   networkType: Type of network in use. Can be one of the following:
+   *   networkType: Type of network in use. (NOTE: It's deprecated to preserve the privacy) Can be one of the following:
    *       bluetooth: This connection uses bluetooth.
    *       celullar: The connection uses a cellular data service to connect. This includes all cellular data services including EDGE (2G), HSPA (3G), LTE (4G), and NR (5G).
    *       ethernet: This connection uses an ethernet network.
@@ -2068,6 +2070,9 @@ class AnboxWebRTCManager {
   }
 
   _onWsOpen() {
+    this._appliedRemoteDescription = false;
+    this._pendingCandidates = [];
+
     const config = {
       iceServers: this._stunServers,
     };
@@ -2164,16 +2169,24 @@ class AnboxWebRTCManager {
             type: "answer",
             sdp: sdp,
           })
-        );
+        ).then(() => {
+          this._appliedRemoteDescription = true;
+
+          let index = this._pendingCandidates.length
+          while (index--) {
+            let candidate = this._pendingCandidates[index]
+            this._addIceCandidate(candidate);
+            this._pendingCandidates.splice(index, 1);
+          }
+        });
         break;
       }
       case "candidate": {
-        this._log("got RTC candidate");
-        this._pc.addIceCandidate({
-          candidate: atob(msg.candidate),
-          sdpMLineIndex: msg.sdpMLineIndex,
-          sdpMid: msg.sdpMid,
-        });
+        if (this._appliedRemoteDescription) {
+          this._addIceCandidate(msg);
+        } else {
+          this._pendingCandidates.push(msg);
+        }
         break;
       }
       case "error": {
@@ -2196,6 +2209,15 @@ class AnboxWebRTCManager {
       .createOffer()
       .then(this._onRtcOfferCreated.bind(this))
       .catch((err) => this._onError(`failed to create WebRTC offer: ${err}`));
+  }
+
+  _addIceCandidate(msg) {
+    this._log("got RTC candidate");
+    this._pc.addIceCandidate({
+      candidate: atob(msg.candidate),
+      sdpMLineIndex: msg.sdpMLineIndex,
+      sdpMid: msg.sdpMid,
+    });
   }
 
   _onRtcOfferCreated(description) {
@@ -2595,7 +2617,6 @@ class AnboxWebRTCManager {
         n.currentRtt = report.currentRoundTripTime;
         let network = this._stats.network;
         if (
-          network.networkType === "" ||
           network.transportType === "" ||
           network.localCandidateType === "" ||
           network.remoteCandidateType === ""
@@ -2603,7 +2624,6 @@ class AnboxWebRTCManager {
           stats.forEach((stat) => {
             if (stat.id === report.localCandidateId) {
               n.localCandidateType = stat.candidateType;
-              n.networkType = stat.networkType;
             }
             if (stat.id === report.remoteCandidateId) {
               n.remoteCandidateType = stat.candidateType;
@@ -2849,6 +2869,12 @@ class AnboxStreamGatewayConnector {
   }
 
   async _joinSession() {
+    const joinInfo = {
+      screen: {
+        width: this._options.screen.width,
+        height: this._options.screen.height,
+      }
+    };
     const rawJoinResp = await fetch(
       this._options.url + "/1.0/sessions/" + this._options.session.id + "/join",
       {
@@ -2858,6 +2884,7 @@ class AnboxStreamGatewayConnector {
           Authorization: "Macaroon root=" + this._options.authToken,
           "Content-Type": "application/json",
         },
+        body: JSON.stringify(joinInfo),
       }
     );
     if (rawJoinResp === undefined || rawJoinResp.status !== 200)
