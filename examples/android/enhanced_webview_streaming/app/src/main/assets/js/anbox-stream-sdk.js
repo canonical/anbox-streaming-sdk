@@ -1,7 +1,7 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
- * Version: 1.17.0
+ * Version: 1.17.1
  *
  * Copyright 2021 Canonical Ltd.
  *
@@ -1556,6 +1556,7 @@ const _keyScancodes = {
   BracketLeft: 47,
   BracketRight: 48,
   Backslash: 49,
+  Quote: 50,
   Semicolon: 51,
   Comma: 54,
   Period: 55,
