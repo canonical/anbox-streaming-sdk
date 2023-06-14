@@ -1,7 +1,7 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
- * Version: 1.18.0
+ * Version: 1.18.1
  *
  * Copyright 2021 Canonical Ltd.
  *
@@ -1193,20 +1193,22 @@ class AnboxStream {
     // Apply video scaling and rotation to the coordinates
     this._translateLocalCoordsToRemoteCoords(event);
 
-    if (event.type === "pointermove" && event.pointerType === "touch")
+    if (event.type === "pointermove" && event.pointerType === "touch") {
+      const index = this._activeTouchPointers.indexOf(event.pointerId);
+      if (index === -1) return;
       this._sendInputEvent("touch-move", {
         id: event.pointerId,
         x: event.clientX,
         y: event.clientY,
       });
-    else if (event.type === "pointermove" && event.pointerType === "mouse")
+    } else if (event.type === "pointermove" && event.pointerType === "mouse") {
       this._sendInputEvent("mouse-move", {
         x: event.clientX,
         y: event.clientY,
         rx: event.movementX,
         ry: event.movementY,
       });
-    else if (event.type === "pointerdown" && event.pointerType === "touch") {
+    } else if (event.type === "pointerdown" && event.pointerType === "touch") {
       const index = this._activeTouchPointers.indexOf(event.pointerId);
       if (index === -1) this._activeTouchPointers.push(event.pointerId);
       this._sendInputEvent("touch-start", {
