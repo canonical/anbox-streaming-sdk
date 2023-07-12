@@ -1,7 +1,7 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
- * Version: 1.18.1
+ * Version: 1.18.2
  *
  * Copyright 2021 Canonical Ltd.
  *
@@ -2384,6 +2384,13 @@ class AnboxWebRTCManager {
 
     switch (msg.type) {
       case "resp:discover":
+        // Do not send the settings or creates an offer again
+        // if the discoverTimeout is destroyed(meaning the client
+        // has used the fallback API for signaling).
+        // This ensures the number and order of m-lines in the
+        // offer and the answer are identical.
+        if (this._discoverTimeout === null) return;
+
         this._stopDiscoverTimeout();
 
         if (this._apiVersionInUse > msg.max_api_version) {
