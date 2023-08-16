@@ -1,7 +1,7 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
- * Version: 1.18.2
+ * Version: 1.19.0
  *
  * Copyright 2021 Canonical Ltd.
  *
@@ -64,16 +64,14 @@ const SCP_CAUSE_CODE_USER_INITIATED_ABORT = 12;
 function newError(msg, code) {
   var options = {
     cause: {
-      code: ANBOX_STREAM_SDK_ERROR_UNKNOWN
-    }
+      code: ANBOX_STREAM_SDK_ERROR_UNKNOWN,
+    },
   };
 
-  if (Number.isInteger(code))
-    options.cause.code = code;
+  if (Number.isInteger(code)) options.cause.code = code;
 
   return new Error(msg, options);
 }
-
 
 class AnboxStream {
   /**
@@ -118,6 +116,8 @@ class AnboxStream {
    * @param [options.dataChannels[name].callbacks.message=none] {function} A callback function that is triggered when a message has been received from the remote peer.
    * @param [options.dataChannels[name].callbacks.close=none] {function} A callback function that is triggered when the data channel has closed.
    * @param [options.dataChannels[name].callbacks.error=none] {function} A callback function that is triggered when an error occurs on the data channel.
+   * @param [options.video] {object} Configuration settings for the video streaming.
+   * @param [options.video.preferred_decoder_codecs] {object} A list of preferred video decoder codecs that are used by the client. Can be one or more video codecs: AV1, H264, VP8, VP9.
    * @param [options.experimental] {object} Experimental features. Not recommended on production.
    * @param [options.experimental.disableBrowserBlock=false] {boolean} Don't throw an error if an unsupported browser is detected.
    * @param [options.experimental.emulatePointerEvent=true] {boolean} Emulate pointer events when their coordinates are outside of the video element.
@@ -125,7 +125,10 @@ class AnboxStream {
    */
   constructor(options) {
     if (this._nullOrUndef(options)) {
-      throw newError("missing options", ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "missing options",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     this._fillDefaults(options);
@@ -157,6 +160,7 @@ class AnboxStream {
         enable: this._options.enableStats,
       },
       debug: this._options.experimental.debug,
+      preferredVideoDecoderCodecs: this._options.video.preferred_decoder_codecs,
     });
     this._webrtcManager.onReady(this._webrtcReady.bind(this));
     this._webrtcManager.onError((err) => {
@@ -219,7 +223,8 @@ class AnboxStream {
     } catch (e) {
       this._stopStreamingOnError(
         "connector failed to connect: " + e.message,
-        ANBOX_STREAM_SDK_ERROR_CONNECTOR_FAILED);
+        ANBOX_STREAM_SDK_ERROR_CONNECTOR_FAILED
+      );
       return;
     }
 
@@ -425,8 +430,10 @@ class AnboxStream {
       this._nullOrUndef(update.speed) ||
       this._nullOrUndef(update.bearing)
     ) {
-      throw newError("incomplete location update",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "incomplete location update",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     if (
@@ -434,8 +441,10 @@ class AnboxStream {
       update.format !== "nmea" &&
       update.format !== "wgs84"
     ) {
-      throw newError("invalid gps data format",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "invalid gps data format",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     return this._webrtcManager.sendControlMessage(
@@ -450,14 +459,18 @@ class AnboxStream {
       navigator.userAgent.indexOf("Firefox") === -1 &&
       navigator.userAgent.indexOf("Safari") === -1
     )
-      throw newError("unsupported browser",
-        ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED);
+      throw newError(
+        "unsupported browser",
+        ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED
+      );
   }
 
   _fillDefaults(options) {
-    if (this._nullOrUndef(options.apiVersion)) options.apiVersion = ANBOX_STREAM_SDK_MAX_CLIENT_API_VERSION;
+    if (this._nullOrUndef(options.apiVersion))
+      options.apiVersion = ANBOX_STREAM_SDK_MAX_CLIENT_API_VERSION;
 
-    if (this._nullOrUndef(options.fallbackApiVersion)) options.fallbackApiVersion = ANBOX_STREAM_SDK_FALLBACK_CLIENT_API_VERSION;
+    if (this._nullOrUndef(options.fallbackApiVersion))
+      options.fallbackApiVersion = ANBOX_STREAM_SDK_FALLBACK_CLIENT_API_VERSION;
 
     if (this._nullOrUndef(options.fullScreen)) options.fullScreen = false;
 
@@ -496,6 +509,25 @@ class AnboxStream {
 
     if (this._nullOrUndef(options.callbacks)) options.callbacks = {};
 
+    if (this._nullOrUndef(options.video)) options.video = {};
+
+    if (this._nullOrUndef(options.video.preferred_decoder_codecs))
+      options.video.preferred_decoder_codecs = [];
+    else {
+      options.video.preferred_decoder_codecs.forEach((codec) => {
+        const supported_codecs = ["AV1", "H264", "VP8", "VP9"];
+        if (
+          !supported_codecs.find(
+            (c) => c === codec || c === codec.toUpperCase()
+          )
+        )
+          throw newError(
+            "invalid video decoder codec",
+            ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+          );
+      });
+    }
+
     if (this._nullOrUndef(options.callbacks.ready))
       options.callbacks.ready = () => {};
 
@@ -516,8 +548,10 @@ class AnboxStream {
 
     if (!this._nullOrUndef(options.dataChannels)) {
       if (Object.keys(options.dataChannels).length > maxNumberOfDataChannels) {
-        throw newError("exceeds the maximum allowed length of data channels",
-          ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+        throw newError(
+          "exceeds the maximum allowed length of data channels",
+          ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+        );
       }
 
       Object.keys(options.dataChannels).forEach((name) => {
@@ -555,8 +589,10 @@ class AnboxStream {
 
   _validateApiVersion(version) {
     if (version > ANBOX_STREAM_SDK_MAX_CLIENT_API_VERSION || version < 0)
-      throw newError(`invalid API version. Must be >= 0 and <= {ANBOX_STREAM_SDK_MAX_CLIENT_API_VERSION}`,
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        `invalid API version. Must be >= 0 and <= {ANBOX_STREAM_SDK_MAX_CLIENT_API_VERSION}`,
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
   }
 
   _validateOptions(options) {
@@ -564,34 +600,42 @@ class AnboxStream {
     this._validateApiVersion(options.fallbackApiVersion);
 
     if (this._nullOrUndef(options.targetElement)) {
-      throw newError("missing targetElement parameter",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "missing targetElement parameter",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     const container = document.getElementById(options.targetElement);
     if (container === null) {
       throw newError(
         `target element "${options.targetElement}" does not exist`,
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
-    }
-    else if (container.clientWidth == 0 || container.clientHeight == 0)
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
+    } else if (container.clientWidth == 0 || container.clientHeight == 0)
       console.error(
         "AnboxStream: video container element misses size. Please see https://anbox-cloud.io/docs/howto/stream/web-client"
       );
 
     if (this._nullOrUndef(options.connector)) {
-      throw newError("missing connector",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "missing connector",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     if (typeof options.connector.connect !== "function") {
-      throw newError('missing "connect" method on connector',
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        'missing "connect" method on connector',
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     if (typeof options.connector.disconnect !== "function") {
-      throw newError('missing "disconnect" method on connector',
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        'missing "disconnect" method on connector',
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     const _activityNamePattern =
@@ -600,8 +644,10 @@ class AnboxStream {
       options.foregroundActivity.length > 0 &&
       !_activityNamePattern.test(options.foregroundActivity)
     ) {
-      throw newError("invalid foreground activity name",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "invalid foreground activity name",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
   }
 
@@ -710,8 +756,10 @@ class AnboxStream {
    */
   captureKeyboard() {
     if (!this._options.controls.keyboard) {
-      throw newError("keyboard controls are disabled",
-        ANBOX_STREAM_SDK_ERROR_NOT_ALLOWED);
+      throw newError(
+        "keyboard controls are disabled",
+        ANBOX_STREAM_SDK_ERROR_NOT_ALLOWED
+      );
     }
 
     for (const controlName in this.controls.keyboard)
@@ -724,8 +772,10 @@ class AnboxStream {
    */
   releaseKeyboard() {
     if (!this._options.controls.keyboard) {
-      throw newError("keyboard controls are disabled",
-        ANBOX_STREAM_SDK_ERROR_NOT_ALLOWED);
+      throw newError(
+        "keyboard controls are disabled",
+        ANBOX_STREAM_SDK_ERROR_NOT_ALLOWED
+      );
     }
 
     for (const controlName in this.controls.keyboard)
@@ -817,8 +867,10 @@ class AnboxStream {
     const currentPos = orientations.indexOf(startingOrientation);
     const desiredPos = orientations.indexOf(desiredOrientation);
     if (currentPos === -1 || desiredPos === -1) {
-      throw newError("invalid orientation given",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "invalid orientation given",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
     let requiredTurns = desiredPos - currentPos;
     return requiredTurns * 90 - 360 * Math.floor(requiredTurns / 360);
@@ -913,7 +965,10 @@ class AnboxStream {
         videoWidth = video.videoHeight;
         break;
       default:
-        throw newError("unhandled rotation", ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED);
+        throw newError(
+          "unhandled rotation",
+          ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED
+        );
     }
 
     // By what percentage do we have to grow/shrink the video so it has the same size as its container
@@ -948,7 +1003,10 @@ class AnboxStream {
         )}px`;
         break;
       default:
-        throw newError("unhandled rotation", ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED);
+        throw newError(
+          "unhandled rotation",
+          ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED
+        );
     }
 
     // Initialize basic orientation
@@ -1752,6 +1810,7 @@ class AnboxWebRTCManager {
    * @param [options.enableVideoStream=true] {boolean} Enable video stream only when peer connection is established.
    * @param [options.deviceType] {string} Indicate the type of the device the SDK is running on
    * @param [options.foregroundActivity] {string} Activity to be displayed in the foreground. NOTE: it only works with an application that has APK provided on its creation.
+   * @param [options.preferredVideoDecoderCodecs] {string[]} List of perferred video decoder codecs that are used by the client.
    * @param [options.stats] {Object}
    * @param [options.stats.enable=false] {boolean} Enable collection of statistics. Not recommended in production
    * @param [options.stats.overlayID] {string} ID of the container in which the stat overlay will be displayed. Can be the stream container ID or something else.
@@ -1804,6 +1863,8 @@ class AnboxWebRTCManager {
     this._foregroundActivity = options.foregroundActivity || "";
 
     this._dataChannels = options.dataChannels;
+    this._preferredVideoDecoderCodecs =
+      options.preferredVideoDecoderCodecs || [];
 
     this._startTimer = performance.now();
     this._statsEnabled = options.stats?.enable || false;
@@ -1867,7 +1928,7 @@ class AnboxWebRTCManager {
 
     this._debugEnabled = options.debug;
     this._fallbackApiVersion = options.fallbackApiVersion;
-    this._apiVersionInUse = options.apiVersion
+    this._apiVersionInUse = options.apiVersion;
 
     this._onError = () => {};
     this._onReady = () => {};
@@ -1987,15 +2048,18 @@ class AnboxWebRTCManager {
    */
   start(session) {
     if (session.websocket === undefined || session.websocket.length === 0) {
-      throw this._onError("connector did not return any signaling information",
-        ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED);
+      throw this._onError(
+        "connector did not return any signaling information",
+        ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED
+      );
     }
 
     if (session.stunServers.length > 0)
       this._includeStunServers(session.stunServers);
 
     this._signalingTimeout = window.setTimeout(
-      () => this._onError("signaling timed out", ANBOX_STREAM_SDK_ERROR_TIMEOUT),
+      () =>
+        this._onError("signaling timed out", ANBOX_STREAM_SDK_ERROR_TIMEOUT),
       5 * 60 * 1000
     );
     this._connectSignaler(session.websocket);
@@ -2041,14 +2105,18 @@ class AnboxWebRTCManager {
    */
   showStatsOverlay() {
     if (!this._statsOverlayID || this._statsOverlayID.length === 0) {
-      throw newError("no overlay container id given at initialization",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "no overlay container id given at initialization",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     const container = document.getElementById(this._statsOverlayID);
     if (!container) {
-      throw newError("invalid overlay container",
-        ANBOX_STREAM_SDK_ERROR_INTERNAL);
+      throw newError(
+        "invalid overlay container",
+        ANBOX_STREAM_SDK_ERROR_INTERNAL
+      );
     }
 
     this._showStatsOverlay = true;
@@ -2080,8 +2148,10 @@ class AnboxWebRTCManager {
 
     const stats = document.getElementById(this._statsOverlayID + "_child");
     if (!stats) {
-      throw newError("invalid overlay container",
-        ANBOX_STREAM_SDK_ERROR_INTERNAL);
+      throw newError(
+        "invalid overlay container",
+        ANBOX_STREAM_SDK_ERROR_INTERNAL
+      );
     }
 
     stats.remove();
@@ -2274,8 +2344,7 @@ class AnboxWebRTCManager {
   }
 
   _sendSettings() {
-    if (this._apiVersionInUse < 2)
-      this._setupTransceivers();
+    if (this._apiVersionInUse < 2) this._setupTransceivers();
 
     var settingsMsg = {
       type: "settings",
@@ -2286,18 +2355,23 @@ class AnboxWebRTCManager {
 
     if (this._apiVersionInUse >= 2) {
       // Starting with API version 2 we send the data channels as part of the settings message
-      settingsMsg.data_channels = Object.keys(this._dataChannels)
-      settingsMsg.enable_speaker = (this._stream.audio && this._userMedia.speakers)
-      settingsMsg.enable_microphone = (this._stream.audio && this._userMedia.mic)
-      settingsMsg.enable_video = (this._stream.video)
-      settingsMsg.enable_camera = (this._stream.video && this._userMedia.camera)
+      settingsMsg.data_channels = Object.keys(this._dataChannels);
+      settingsMsg.enable_speaker =
+        this._stream.audio && this._userMedia.speakers;
+      settingsMsg.enable_microphone = this._stream.audio && this._userMedia.mic;
+      settingsMsg.enable_video = this._stream.video;
+      settingsMsg.enable_camera = this._stream.video && this._userMedia.camera;
     }
 
-    if (this._deviceType.length > 0)
-      settingsMsg.device_type = this._deviceType;
+    if (this._deviceType.length > 0) settingsMsg.device_type = this._deviceType;
 
     if (this._foregroundActivity.length > 0)
       settingsMsg.foreground_activity = this._foregroundActivity;
+
+    if (this._preferredVideoDecoderCodecs.length > 0)
+      settingsMsg.video = {
+        preferred_decoder_codecs: this._preferredVideoDecoderCodecs,
+      };
 
     this._ws.send(JSON.stringify(settingsMsg));
 
@@ -2315,11 +2389,11 @@ class AnboxWebRTCManager {
       if (this._controlChan !== null) {
         let code = ANBOX_STREAM_SDK_ERROR_WEBRTC_CONTROL_FAILED;
         switch (err.error.sctpCauseCode) {
-        case SCP_CAUSE_CODE_USER_INITIATED_ABORT:
-          code = ANBOX_STREAM_SDK_ERROR_WEBRTC_DISCONNECTED;
-          break;
-        default:
-          break;
+          case SCP_CAUSE_CODE_USER_INITIATED_ABORT:
+            code = ANBOX_STREAM_SDK_ERROR_WEBRTC_DISCONNECTED;
+            break;
+          default:
+            break;
         }
         this._onError(`error on control channel: ${err.error.message}`, code);
       }
@@ -2341,14 +2415,20 @@ class AnboxWebRTCManager {
   }
 
   _onWsError(err) {
-    this._onError(`failed to communicate with the signaler: ${err}`,
-      ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED);
+    this._onError(
+      `failed to communicate with the signaler: ${
+        err.message
+          ? err.message
+          : "There was an error with the websocket, check debug console for more information"
+      }`,
+      ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED
+    );
   }
 
   _applyPendingICECandiates() {
-    let index = this._pendingCandidates.length
+    let index = this._pendingCandidates.length;
     while (index--) {
-      let candidate = this._pendingCandidates[index]
+      let candidate = this._pendingCandidates[index];
       this._addIceCandidate(candidate);
       this._pendingCandidates.splice(index, 1);
     }
@@ -2357,7 +2437,8 @@ class AnboxWebRTCManager {
   _sendRtcAnswer() {
     this._createPlaceholderVideoStream();
     this._setupTransceivers();
-    this._pc.createAnswer()
+    this._pc
+      .createAnswer()
       .then((answer) => this._pc.setLocalDescription(answer))
       .then(() => {
         let msg = {
@@ -2369,8 +2450,10 @@ class AnboxWebRTCManager {
         this._applyPendingICECandiates();
       })
       .catch((err) => {
-        this._onError(`failed to create WebRTC answer: ${err}`,
-          ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED);
+        this._onError(
+          `failed to create WebRTC answer: ${err}`,
+          ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED
+        );
       });
   }
 
@@ -2395,8 +2478,10 @@ class AnboxWebRTCManager {
 
         if (this._apiVersionInUse > msg.max_api_version) {
           if (this._fallbackApiVersion > msg.max_api_version) {
-            this._onError("API version not supported by server",
-            ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+            this._onError(
+              "API version not supported by server",
+              ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+            );
             return;
           }
           this._apiVersionInUse = this._fallbackApiVersion;
@@ -2405,24 +2490,32 @@ class AnboxWebRTCManager {
         this._sendSettings();
         break;
       case "offer":
-        /* fallthrough */
+      /* fallthrough */
       case "answer": {
         const sdp = atob(msg.sdp);
         this._log(`got RTC ${msg.type}:\n${sdp}`);
-        this._pc.setRemoteDescription(
-          new RTCSessionDescription({
-            type: msg.type,
-            sdp: sdp,
-          })
-        ).then(() => {
-          this._appliedRemoteDescription = true;
+        this._pc
+          .setRemoteDescription(
+            new RTCSessionDescription({
+              type: msg.type,
+              sdp: sdp,
+            })
+          )
+          .then(() => {
+            this._appliedRemoteDescription = true;
 
-          if (msg.type == "offer") {
-            this._sendRtcAnswer();
-          } else {
-            this._applyPendingICECandiates();
-          }
-        });
+            if (msg.type == "offer") {
+              this._sendRtcAnswer();
+            } else {
+              this._applyPendingICECandiates();
+            }
+          })
+          .catch((err) => {
+            this._onError(
+              `failed to set remote description: ${err}`,
+              ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED
+            );
+          });
         break;
       }
       case "candidate": {
@@ -2438,8 +2531,10 @@ class AnboxWebRTCManager {
         // discover request we can immediately use our fallback API version
         // as older Anbox versions respond with that error for unknown signaling
         // message types
-        if (this._discoverTimeout !== null &&
-            msg.code == ANBOX_STREAM_SIGNALING_ERROR_BAD_REQUEST) {
+        if (
+          this._discoverTimeout !== null &&
+          msg.code == ANBOX_STREAM_SIGNALING_ERROR_BAD_REQUEST
+        ) {
           this._stopDiscoverTimeout();
           this._useApiFallback();
           return;
@@ -2467,8 +2562,10 @@ class AnboxWebRTCManager {
       .createOffer()
       .then(this._onRtcOfferCreated.bind(this))
       .catch((err) => {
-        this._onError(`failed to create WebRTC offer: ${err}`,
-          ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED);
+        this._onError(
+          `failed to create WebRTC offer: ${err}`,
+          ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED
+        );
       });
   }
 
@@ -2560,8 +2657,10 @@ class AnboxWebRTCManager {
     switch (this._pc.iceConnectionState) {
       case "failed":
         this._log("ICE failed");
-        this._onError("failed to establish a WebRTC connection via ICE",
-          ANBOX_STREAM_SDK_ERROR_WEBRTC_FAILED);
+        this._onError(
+          "failed to establish a WebRTC connection via ICE",
+          ANBOX_STREAM_SDK_ERROR_WEBRTC_FAILED
+        );
         break;
 
       case "disconnected":
@@ -2570,8 +2669,10 @@ class AnboxWebRTCManager {
         // just have a temporary network problem. We wait for a moment and
         // if the connection isn't reestablished we stop streaming
         this._disconnectedTimeout = window.setTimeout(() => {
-          this._onError("lost WebRTC connection",
-            ANBOX_STREAM_SDK_ERROR_WEBRTC_LOST_CONNECTION);
+          this._onError(
+            "lost WebRTC connection",
+            ANBOX_STREAM_SDK_ERROR_WEBRTC_LOST_CONNECTION
+          );
         }, 10 * 1000);
         break;
 
@@ -2580,7 +2681,8 @@ class AnboxWebRTCManager {
         if (this._signalingTimeout) {
           this._onError(
             "timed out to establish a WebRTC connection as signaler did not respond",
-            ANBOX_STREAM_SDK_ERROR_SIGNALING_TIMEOUT);
+            ANBOX_STREAM_SDK_ERROR_SIGNALING_TIMEOUT
+          );
           return;
         }
         this._onClose();
@@ -2689,8 +2791,10 @@ class AnboxWebRTCManager {
       })
       .then(this._onRealVideoInputStreamAvailable.bind(this))
       .catch((e) => {
-        this._onError(`failed to open camera: ${e.name}`,
-          ANBOX_STREAM_SDK_ERROR_USER_MEDIA);
+        this._onError(
+          `failed to open camera: ${e.name}`,
+          ANBOX_STREAM_SDK_ERROR_USER_MEDIA
+        );
       });
   }
 
@@ -2737,8 +2841,10 @@ class AnboxWebRTCManager {
       })
       .then(this._onRealAudioInputStreamAvailable.bind(this))
       .catch((e) => {
-        this._onError(`failed to open microphone: ${e.name}`,
-          ANBOX_STREAM_SDK_ERROR_USER_MEDIA);
+        this._onError(
+          `failed to open microphone: ${e.name}`,
+          ANBOX_STREAM_SDK_ERROR_USER_MEDIA
+        );
       });
   }
 
@@ -2816,7 +2922,8 @@ class AnboxWebRTCManager {
         v.framesReceived = report.framesReceived;
         v.keyFramesDecoded = report.keyFramesDecoded;
         v.totalAssemblyTime = report.totalAssemblyTime;
-        v.framesAssembledFromMultiplePackets = report.framesAssembledFromMultiplePackets;
+        v.framesAssembledFromMultiplePackets =
+          report.framesAssembledFromMultiplePackets;
         v.pliCount = report.pliCount;
         v.firCount = report.firCount;
         v.nackCount = report.nackCount;
@@ -2974,8 +3081,14 @@ class AnboxWebRTCManager {
     insertStat("framesDecoded", this._stats.video.framesDecoded);
     insertStat("framesReceived", this._stats.video.framesReceived);
     insertStat("keyFramesDecoded", this._stats.video.keyFramesDecoded);
-    insertStat("totalAssemblyTime", s_format(this._stats.video.totalAssemblyTime));
-    insertStat("framesAssembledFromMultiplePackets", this._stats.video.framesAssembledFromMultiplePackets);
+    insertStat(
+      "totalAssemblyTime",
+      s_format(this._stats.video.totalAssemblyTime)
+    );
+    insertStat(
+      "framesAssembledFromMultiplePackets",
+      this._stats.video.framesAssembledFromMultiplePackets
+    );
     insertStat("pliCount", this._stats.video.pliCount);
     insertStat("firCount", this._stats.video.firCount);
     insertStat("nackCount", this._stats.video.nackCount);
@@ -3042,15 +3155,23 @@ class AnboxStreamGatewayConnector {
     if (this._nullOrUndef(options)) throw Error("missing options");
 
     if (this._nullOrUndef(options.url))
-      throw newError("missing url parameter", ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "missing url parameter",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
 
     if (!options.url.includes("https") && !options.url.includes("http"))
-      throw newError("unsupported scheme", ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
-
+      throw newError(
+        "unsupported scheme",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     else if (options.url.endsWith("/")) options.url = options.url.slice(0, -1);
 
     if (this._nullOrUndef(options.authToken))
-      throw newError("missing authToken parameter", ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "missing authToken parameter",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
 
     if (this._nullOrUndef(options.session)) options.session = {};
 
@@ -3060,8 +3181,10 @@ class AnboxStreamGatewayConnector {
       this._nullOrUndef(options.session.id) &&
       this._nullOrUndef(options.session.app)
     ) {
-      throw newError("session.app or session.id required",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        "session.app or session.id required",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     if (this._nullOrUndef(options.session.joinable))
@@ -3096,8 +3219,10 @@ class AnboxStreamGatewayConnector {
     try {
       var extra_data_obj = JSON.parse(this._options.extraData);
     } catch (e) {
-      throw newError(`invalid json format extra data was given: ${e.name}`,
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT);
+      throw newError(
+        `invalid json format extra data was given: ${e.name}`,
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
     }
 
     const appInfo = {
@@ -3132,7 +3257,10 @@ class AnboxStreamGatewayConnector {
       body: JSON.stringify(appInfo),
     });
     if (rawResp === undefined || rawResp.status !== 201)
-      throw newError("Failed to create session", ANBOX_STREAM_SDK_ERROR_SESSION_FAILED);
+      throw newError(
+        "Failed to create session",
+        ANBOX_STREAM_SDK_ERROR_SESSION_FAILED
+      );
 
     const response = await rawResp.json();
     if (response === undefined || response.status !== "success")
@@ -3150,7 +3278,7 @@ class AnboxStreamGatewayConnector {
       screen: {
         width: this._options.screen.width,
         height: this._options.screen.height,
-      }
+      },
     };
     const rawJoinResp = await fetch(
       this._options.url + "/1.0/sessions/" + this._options.session.id + "/join",
@@ -3165,7 +3293,10 @@ class AnboxStreamGatewayConnector {
       }
     );
     if (rawJoinResp === undefined || rawJoinResp.status !== 200)
-      throw newError("Session does not exist anymore", ANBOX_STREAM_SDK_ERROR_SESSION_FAILED);
+      throw newError(
+        "Session does not exist anymore",
+        ANBOX_STREAM_SDK_ERROR_SESSION_FAILED
+      );
 
     let response = await rawJoinResp.json();
     if (response === undefined || response.status !== "success")
