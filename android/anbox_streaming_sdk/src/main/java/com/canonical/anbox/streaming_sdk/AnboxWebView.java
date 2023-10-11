@@ -19,6 +19,7 @@
 package com.canonical.anbox.streaming_sdk;
 
 import android.content.Context;
+import android.provider.Settings;
 import android.text.InputType;
 import android.util.AttributeSet;
 import android.util.Log;
@@ -137,7 +138,23 @@ public class AnboxWebView extends WebView implements
         // NOTE: use IME_FLAG_NO_EXTRACT_UI here to enable IME
         // to show half screen rather than full screen in landscape mode.
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI;
-        return new InputConnection(this, true);
+
+        String activity = Settings.Secure.getString(getContext().getContentResolver(),
+                Settings.Secure.DEFAULT_INPUT_METHOD);
+        String[] segs = activity.split("/", -1);
+        if (segs.length < 2) {
+            return new InputConnection(this, true, true);
+        }
+
+        boolean adjustComposingRegion = true;
+        switch (segs[0]) {
+        case "com.samsung.android.honeyboard":
+            adjustComposingRegion = false;
+            break;
+        default:
+            break;
+        }
+        return new InputConnection(this, true, adjustComposingRegion);
     }
 
     @Override

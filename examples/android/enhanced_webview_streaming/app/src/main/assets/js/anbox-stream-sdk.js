@@ -1,7 +1,7 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
- * Version: 1.19.0
+ * Version: 1.19.2
  *
  * Copyright 2021 Canonical Ltd.
  *

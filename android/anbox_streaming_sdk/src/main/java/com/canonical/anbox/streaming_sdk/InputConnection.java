@@ -42,9 +42,12 @@ public class InputConnection extends BaseInputConnection {
     private SpannableStringBuilder mEditText = new SpannableStringBuilder();
     private boolean mComposingRegionSelected = false;
 
-    InputConnection(View targetView, boolean fullEditor) {
+    private boolean mAdjustComposingRegion = true;
+
+    InputConnection(View targetView, boolean fullEditor, boolean adjustComposingRegion) {
         super(targetView, fullEditor);
         mListener = (TextChangedListener) targetView;
+        mAdjustComposingRegion = adjustComposingRegion;
     }
 
     @Override
@@ -81,7 +84,7 @@ public class InputConnection extends BaseInputConnection {
 
     @Override
     public boolean setComposingText(CharSequence text, int newCursorPosition) {
-        if (!mComposingRegionSelected) {
+        if (mAdjustComposingRegion && !mComposingRegionSelected) {
             setComposingRegion(0, mEditText.length());
         }
 
@@ -115,18 +118,22 @@ public class InputConnection extends BaseInputConnection {
     @Override
     public boolean setComposingRegion(int start, int end) {
         mComposingRegionSelected = true;
-        // Do not use start and end index directly as it doesn't count for
-        // space that was automatically added by IME if this feature is enabled.
-        // For this reason, to keep the position for the current composing text aligned
-        // with BaseInputConnection::setComposingRegion, we will adjust it manually.
-        String composingText = getTextBeforeCursor(end - start, GET_TEXT_WITH_STYLES).toString();
-        int startPos = mEditText.toString().lastIndexOf(composingText);
-        int endPos = end - start + startPos;
+        int startPos = start;
+        int endPos = end;
+        if (mAdjustComposingRegion) {
+            // Do not use start and end index directly as it doesn't count for space
+            // that was automatically added by some IMEs. Therefore, to keep the position
+            // for the current composing text aligned with
+            // BaseInputConnection::setComposingRegion, we will adjust it manually.
+            String composingText = getTextBeforeCursor(end - start, GET_TEXT_WITH_STYLES).toString();
+            startPos = mEditText.toString().lastIndexOf(composingText);
+            endPos = end - start + startPos;
+        }
         boolean ret = super.setComposingRegion(startPos, endPos);
         mListener.onComposingRegionChanged(startPos, endPos);
 
         if (DEBUG) {
-            composingText = getTextBeforeCursor(end - start, GET_TEXT_WITH_STYLES).toString();
+            String composingText = getTextBeforeCursor(end - start, GET_TEXT_WITH_STYLES).toString();
             Log.v(TAG, "setComposingRegion: composingText " + composingText + " editText: " + mEditText.toString());
         }
         return ret;
