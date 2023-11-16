@@ -123,7 +123,7 @@ public class IMEService implements Runnable, ViewTreeObserver.OnGlobalLayoutList
 
         // Do not use the fixed height here to avoid error when
         // changing screen orientation
-        boolean isVisible = keyboardHeight > screenHeight / 3.0;
+        boolean isVisible = keyboardHeight > screenHeight / 4.0;
         if (mIsKeyboardVisible != isVisible) {
             mIsKeyboardVisible = isVisible;
 

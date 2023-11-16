@@ -1,7 +1,7 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
- * Version: 1.19.2
+ * Version: 1.20.0
  *
  * Copyright 2021 Canonical Ltd.
  *
@@ -1838,6 +1838,9 @@ class AnboxWebRTCManager {
     this._audioStream = null;
     this._audioInputStream = null;
     this._videoInputStream = null;
+    this._video_codec_id = null;
+    this._audioOutput_codec_id = null;
+    this._audioInput_codec_id = null;
 
     this._stream = {
       video: options.enableVideoStream,
@@ -1904,6 +1907,7 @@ class AnboxWebRTCManager {
         nackCount: 0,
         qpSum: 0,
         framesAssembledFromMultiplePackets: 0,
+        codec: "",
       },
       audioOutput: {
         bandwidthMbit: 0,
@@ -1913,10 +1917,12 @@ class AnboxWebRTCManager {
         avgJitterBufferDelay: 0,
         packetsReceived: 0,
         packetsLost: 0,
+        codec: "",
       },
       audioInput: {
         bandwidthMbit: 0,
         totalBytesSent: 0,
+        codec: "",
       },
     };
 
@@ -2931,6 +2937,7 @@ class AnboxWebRTCManager {
         v.avgJitterBufferDelay =
           report.jitterBufferDelay / report.jitterBufferEmittedCount;
         v.totalBytesReceived = report.bytesReceived;
+        this._video_codec_id = report.codecId;
         const elapsedInSec = Math.round(
           (report.timestamp -
             (this._lastReport.video?.timestamp || report.timestamp - 1000)) /
@@ -2952,6 +2959,7 @@ class AnboxWebRTCManager {
         a.packetsLost = report.packetsLost;
         a.packetsReceived = report.packetsReceived;
         a.jitter = report.jitter;
+        this._audioOutput_codec_id = report.codecId;
         const elapsedInSec = Math.round(
           (report.timestamp -
             (this._lastReport.audioOutput?.timestamp ||
@@ -2974,6 +2982,7 @@ class AnboxWebRTCManager {
       ) {
         let a = this._stats.audioInput;
         a.totalBytesSent = report.bytesSent;
+        this._audioInput_codec_id = report.codecId;
         const elapsedInSec = Math.round(
           (report.timestamp -
             (this._lastReport.audioInput?.timestamp ||
@@ -3008,6 +3017,16 @@ class AnboxWebRTCManager {
             }
           });
         }
+      } else if (report.type === "codec") {
+        const media_info = report.mimeType.split("/");
+        if (media_info.length < 2) return;
+        const [media_type, media_codec] = media_info;
+        if (report.id == this._video_codec_id && media_type == "video")
+          this._stats.video.codec = media_codec;
+        if (report.id == this._audioOutput_codec_id && media_type == "audio")
+          this._stats.audioOutput.codec = media_codec;
+        if (report.id == this._audioInput_codec_id && media_type == "audio")
+          this._stats.audioInput.codec = media_codec;
       }
     });
   }
@@ -3063,6 +3082,7 @@ class AnboxWebRTCManager {
     insertStat("remoteCandidateType", this._stats.network.remoteCandidateType);
 
     insertHeader("Video");
+    insertStat("codec", this._stats.video.codec);
     insertStat("bandWidth", mbits_format(this._stats.video.bandwidthMbit));
     insertStat(
       "totalBytesReceived",
@@ -3095,6 +3115,7 @@ class AnboxWebRTCManager {
     insertStat("qpSum", this._stats.video.qpSum);
 
     insertHeader("Audio Output");
+    insertStat("codec", this._stats.audioOutput.codec);
     insertStat(
       "bandWidth",
       mbits_format(this._stats.audioOutput.bandwidthMbit)
