@@ -1,6 +1,6 @@
-# Anbox Stream SDK
+# Anbox Streaming SDK
 
-The Anbox Stream SDK is a javascript library you can plug in your website
+The Anbox Streaming SDK is a javascript library you can plug in your website
 to easily establish a video stream of your Anbox instances.
 
 ## Run the Example
