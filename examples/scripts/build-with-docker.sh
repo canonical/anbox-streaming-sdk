@@ -170,7 +170,7 @@ EOF
     mkdir -p "$workdir"/results/
 
     builddir=$(mktemp -p "$PWD" -d .build.XXXXXX)
-    cp "$sdk" "$builddir"/sdk.zip
+    cp -ra "$sdk" "$builddir"/sdk
     cp -ra * "$builddir"
 
     docker run --rm \

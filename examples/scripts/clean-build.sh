@@ -29,8 +29,6 @@ sudo apt-get update -qq
 sudo apt-get clean
 cd /work/src
 
-(mkdir -p /work/src/sdk; unzip /work/src/sdk.zip; mv /work/src/anbox-streaming-sdk_*/* /work/src/sdk)
-
 # NOTE: Only build Android example APK on x86_64 host.
 if [ $(uname -m) = x86_64 ]; then
 # For Anbox Streaming SDK library(AAR)

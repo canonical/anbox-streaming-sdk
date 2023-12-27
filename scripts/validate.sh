@@ -16,6 +16,7 @@
 
 ALLOWLIST="./sdk-files.allowlist"
 SDK_ZIP_TARBALL="./anbox-streaming-sdk.zip"
+SDK_PATH=
 
 show_help() {
     cat <<'EOF'
@@ -26,6 +27,7 @@ Validates Anbox Streaming SDK by checking that all included source files are in 
 optional arguments:
   --allowlist=<path>              Path to the file holding the list of allowed files into the sdk (default: ./sdk-files.allowlist)
   --sdk-zip-tarball=<path>        Path to the streaming sdk zip tarball (default: ./anbox-streaming-sdk.zip)
+  --sdk-path=<path>               Path to the folder path that include the Anbox Streaming SDK
 EOF
 }
 
@@ -39,6 +41,10 @@ while [ -n "$1" ]; do
 			ALLOWLIST=${1#*=}
 			shift
 			;;
+		--sdk-path*)
+			SDK_PATH=${1#*=}
+			shift
+			;;
 		--sdk-zip-tarball=*)
 			SDK_ZIP_TARBALL=${1#*=}
 			shift
@@ -50,8 +56,13 @@ while [ -n "$1" ]; do
 	esac
 done
 
-if [ ! -f "$SDK_ZIP_TARBALL" ]; then
-	echo "Anbox Streaming SDK is missing"
+if [ ! -f "$SDK_ZIP_TARBALL" ] ; then
+	if [ ! -d "$SDK_PATH" ] ; then
+	  echo "Anbox Streaming SDK is missing"
+	  exit 1
+	fi
+elif [ -d "$SDK_PATH" ] ; then
+	echo "parameter '--sdk-path' and '--sdk-zip-tarbll' are mutually exclusive"
 	exit 1
 fi
 
@@ -89,11 +100,15 @@ search_for_remaining_files() {
 (
 	tmpfolder=$(mktemp -d)
 	cleanup() {
-		rm -rf "$tmpfolder"
+	  rm -rf "$tmpfolder"
 	}
 	trap cleanup EXIT INT
 
-	unzip -qq "$SDK_ZIP_TARBALL" -d "$tmpfolder"
+	if [ -d "$SDK_PATH" ]; then
+	  cp -ra "$SDK_PATH" "$tmpfolder"
+	else
+	  unzip -qq "$SDK_ZIP_TARBALL" -d "$tmpfolder"
+	fi
 	cd "$tmpfolder"/anbox-streaming-sdk_*
 	sdk_version="$(pwd | cut -d_ -f2)"
 

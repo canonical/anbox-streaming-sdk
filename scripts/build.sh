@@ -1,4 +1,4 @@
-#!/bin/sh -xe
+#!/bin/bash -xe
 #
 # Copyright 2019 Canonical Ltd.
 #
@@ -15,6 +15,7 @@
 # limitations under the License.
 
 PROXY=
+CREATE_TARBALL=false
 VERSION=$(scripts/gen-version.sh)
 
 for p in "$@"
@@ -26,10 +27,18 @@ do
     --version=*)
         VERSION=${p#*=}
         ;;
+    --create-tarball)
+        CREATE_TARBALL=true
+        ;;
     *)
       echo "unrecognized option $p"
   esac
 done
+
+mkdir_cp() {
+  local dest="${!#}"
+  mkdir -p "$dest" && cp -av "${@:1:${#}-1}" "$dest"
+}
 
 builddir=$(mktemp -d -p $PWD .buildXXXXXX)
 topdir="$PWD"
@@ -38,10 +47,13 @@ trap "rm -rf ${builddir}" INT EXIT
 sdkname=anbox-streaming-sdk_${VERSION}
 sdkdir="$builddir"/"$sdkname"
 
+mkdir_cp LICENSE "$sdkdir"
+
 for f in examples js android; do
   mkdir -p "$sdkdir"/"$f"
 done
 
+# Modify the JS SDK version
 sed -i "s/@VERSION@/${VERSION}/" js/anbox-stream-sdk.js
 
 # Only copy the JS SDK and markdown file to the js folder
@@ -60,36 +72,51 @@ for d in `find $sdkdir/examples -name js -type d`; do
 done
 
 for d in `find $sdkdir/examples -name assets -type d`; do
-    mkdir -p $d/js && cp js/anbox-stream-sdk.js $d/js
+  mkdir_cp js/anbox-stream-sdk.js "$d"/js
 done
 
-(cd "$builddir" ; zip -r "$topdir"/"$sdkname".zip *)
+if [ "$CREATE_TARBALL" = true ]; then
+  (cd "$builddir" ; zip -r "$topdir"/"$sdkname".zip *)
+fi
 
 # Do a test build of our examples with the generated SDK package
 (
    # Copy the anbox-stream-sdk.js file to examples folders
    for d in `find $topdir/examples -name assets -type d`; do
-     mkdir -p $d/js && cp js/anbox-stream-sdk.js $d/js
+     mkdir_cp js/anbox-stream-sdk.js "$d"/js
    done
 
    # Create a symbol link for anbox_streaming_sdk to example/android folder so that we
    # can create the sdk library alongside with Android example when building the APKs.
-   cp -av "$topdir"/android/anbox_streaming_sdk "$topdir"/examples/android/anbox_streaming_sdk; \
-    cd examples; \
-    scripts/build-with-docker.sh --proxy="${PROXY}" \
-    --version="${VERSION}" \
-    --anbox-stream-sdk="$topdir"/"$sdkname".zip; \
-    # To repack zip taball which includes APKs file later
-    mkdir -p "$sdkname"/examples/android/apks; \
-    cp results/*.apk "$sdkname"/examples/android/apks; mv results/*.apk "$topdir"; \
-    # To repack zip taball which includes JAR/AAR files built during the docker runtime
-    mkdir -p "$sdkname"/android/libs && cp results/*.aar "$sdkname"/android/libs; \
-    mkdir -p "$sdkname"/examples/android/enhanced_webview_streaming/app/libs && cp results/*.aar \
-      "$sdkname"/examples/android/enhanced_webview_streaming/app/libs/; \
-    zip -r "$topdir"/"$sdkname".zip "$sdkname"/examples/android/apks/*.apk "$sdkname"/android/libs/*.aar \
-      "$sdkname"/examples/android/enhanced_webview_streaming/app/libs/*.aar
+   cp -av "$topdir"/android/anbox_streaming_sdk "$topdir"/examples/android/anbox_streaming_sdk;
+   cd examples;
+   scripts/build-with-docker.sh --proxy="${PROXY}" \
+     --version="${VERSION}" \
+     --anbox-stream-sdk="$builddir"
 
-    # Validate the streaming sdk to ensure we don't accidentally leak unwanted files.
-    "$topdir"/scripts/validate.sh  --sdk-zip-tarball="$topdir"/"$sdkname".zip \
-      --allowlist="$topdir"/scripts/streaming-sdk-files.allowlist
+    # To repack zip taball which includes APKs file later
+    mkdir_cp results/*.apk "$sdkname"/examples/android/apks;
+    mv results/*.apk "$topdir";
+    # To repack zip taball which includes JAR/AAR files built during the docker runtime
+    mkdir_cp results/*.aar "$sdkname"/android/libs
+    mkdir_cp results/*.aar "$sdkname"/examples/android/enhanced_webview_streaming/app/libs
+
+    if [ "$CREATE_TARBALL" = true ]; then
+      zip -r "$topdir"/"$sdkname".zip "$sdkname"/examples/android/apks/*.apk "$sdkname"/android/libs/*.aar \
+        "$sdkname"/examples/android/enhanced_webview_streaming/app/libs/*.aar
+
+      # Validate the streaming sdk to ensure we don't accidentally leak unwanted files.
+      "$topdir"/scripts/validate.sh --sdk-zip-tarball="$topdir"/"$sdkname".zip \
+        --allowlist="$topdir"/scripts/streaming-sdk-files.allowlist
+    else
+      mkdir_cp "$sdkname"/examples/android/apks/*.apk "$sdkdir"/examples/android/apks/
+      mkdir_cp "$sdkname"/android/libs/*.aar "$sdkdir"/android/libs/
+      mkdir_cp "$sdkname"/examples/android/enhanced_webview_streaming/app/libs/*.aar \
+         "$sdkdir"/examples/android/enhanced_webview_streaming/app/libs/
+
+      "$topdir"/scripts/validate.sh --sdk-path="$sdkdir" \
+        --allowlist="$topdir"/scripts/streaming-sdk-files.allowlist
+
+      mv "$builddir" "$topdir"/results
+    fi
 )
