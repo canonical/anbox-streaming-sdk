@@ -17,6 +17,7 @@
 DOCKER_IMAGE_NAME=anbox-stream-sdk-native-example
 DOCKER_IMAGE_TAG=latest
 UBUNTU_VERSION=18.04
+BASE_DOCKER_IMAGE="ubuntu:$UBUNTU_VERSION"
 ANDROID_NDK_VERSION=21.0.6113669
 ANDROID_HOME=/usr/local/android-sdk
 ANDROID_PLATFORM_VERSION=30
@@ -54,32 +55,11 @@ if [ ! -e "$sdk" ]; then
     exit 1
 fi
 
-if [ ! -e /usr/bin/qemu-aarch64-static ]; then
-    sudo apt install -y qemu-user-static
-fi
-
 # Build the docker container. If the container is already up to date this
 # will be a no-op
 workdir=$(pwd)
-
-for ARCH in "x86_64" "aarch64"; do
-    case "$ARCH" in
-        x86_64)
-            BASE_DOCKER_IMAGE="ubuntu:$UBUNTU_VERSION"
-            ;;
-        aarch64)
-            BASE_DOCKER_IMAGE="arm64v8/ubuntu:$UBUNTU_VERSION"
-            ;;
-            *)
-            echo "ERROR: unsupported architecture $ARCH"
-            exit 1
-            ;;
-    esac
-    DOCKER_IMAGE_NAME="$DOCKER_IMAGE_NAME-$ARCH"
-
-    cd $(mktemp -d)
-
-    cat << EOF > Dockerfile
+cd $(mktemp -d)
+cat << EOF > Dockerfile
 FROM $BASE_DOCKER_IMAGE
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -113,11 +93,7 @@ RUN useradd -u $(id -u) -U jenkins
 RUN echo "jenkins ALL = NOPASSWD: ALL" >> /etc/sudoers
 RUN mkdir /work && chown jenkins:jenkins /work
 RUN mkdir /home/jenkins && chown -R jenkins:jenkins /home/jenkins
-EOF
 
-    if [ "$ARCH" = x86_64 ]; then
-        # Only build Android APK on x86_64
-        cat << EOF >> Dockerfile
 RUN apt install -qq -y \
 		openjdk-8-jre \
 		gradle
@@ -141,45 +117,40 @@ RUN ${ANDROID_HOME}/cmdline-tools/bin/sdkmanager --sdk_root="${ANDROID_HOME}" \
     "cmake;${CMAKE_VERSION}" \
     "platform-tools"
 EOF
-        if [ -n "$proxy" ]; then
-            proxy_host=$(echo "$proxy" | awk -F '[/:]' '{print $4}')
-            proxy_port=$(echo "$proxy" | awk -F '[/:]' '{print $5}')
 
-            cat << EOF > gradle.properties
+if [ -n "$proxy" ]; then
+  proxy_host=$(echo "$proxy" | awk -F '[/:]' '{print $4}')
+  proxy_port=$(echo "$proxy" | awk -F '[/:]' '{print $5}')
+
+  cat << EOF > gradle.properties
 systemProp.http.proxyHost=$proxy_host
 systemProp.http.proxyPort=$proxy_port
 systemProp.https.proxyHost=$proxy_host
 systemProp.https.proxyPort=$proxy_port
 EOF
 
-            cat << EOF >> Dockerfile
+  cat << EOF >> Dockerfile
 RUN mkdir /home/jenkins/.gradle && chown -R jenkins:jenkins /home/jenkins/.gradle
 COPY gradle.properties /home/jenkins/.gradle
 EOF
-        fi
-    else
-        cp /usr/bin/qemu-aarch64-static ./
-        cat << EOF >> Dockerfile
-COPY qemu-aarch64-static /usr/bin/qemu-aarch64-static
-EOF
-    fi
+fi
 
-    docker build -t "$DOCKER_IMAGE_NAME":"$DOCKER_IMAGE_TAG" .
-    cd $workdir
+docker build -t "$DOCKER_IMAGE_NAME":"$DOCKER_IMAGE_TAG" .
+cd $workdir && mkdir results
 
-    mkdir -p "$workdir"/results/
+builddir=$(mktemp -p "$PWD" -d .build.XXXXXX)
+cleanup() {
+	rm -rf "$builddir"
+}
+trap cleanup INT EXIT TERM
 
-    builddir=$(mktemp -p "$PWD" -d .build.XXXXXX)
-    cp -ra "$sdk" "$builddir"/sdk
-    cp -ra * "$builddir"
+cp -ra "$sdk" "$builddir"/sdk
+cp -ra * "$builddir"
 
-    docker run --rm \
-	    --network host \
-	    -v "$PWD"/results:/work \
-	    -v $builddir:/work/src \
-	    -u $(id -u $USER) \
-	    "$DOCKER_IMAGE_NAME":"$DOCKER_IMAGE_TAG" \
-	    /work/src/scripts/clean-build.sh --version="${version}" $@
-
-    rm -rf "$builddir"
-done
+docker run --rm \
+  --network host \
+  -v "$PWD"/results:/work \
+  -v $builddir:/work/src \
+  -u $(id -u $USER) \
+  "$DOCKER_IMAGE_NAME":"$DOCKER_IMAGE_TAG" \
+  /work/src/scripts/clean-build.sh --version="${version}" $@
