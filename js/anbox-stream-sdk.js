@@ -1,7 +1,7 @@
 /*
  * This file is part of Anbox Cloud Streaming SDK
  *
- * Version: 1.20.1
+ * Version: 1.21.0
  *
  * Copyright 2021 Canonical Ltd.
  *
@@ -121,6 +121,10 @@ class AnboxStream {
    * @param [options.experimental] {object} Experimental features. Not recommended on production.
    * @param [options.experimental.disableBrowserBlock=false] {boolean} Don't throw an error if an unsupported browser is detected.
    * @param [options.experimental.emulatePointerEvent=true] {boolean} Emulate pointer events when their coordinates are outside of the video element.
+   * @param [options.experimental.upscaling] {object} Experimental video upscaling features.
+   * @param [options.experimental.upscaling.enabled=false] {boolean} Enable upscaling for video streaming on the client side. Currently, the upscaling relies on AMD FidelityFX Super Resolution 1.0 (FSR).
+   * @param [options.experimental.upscaling.fragmentShader] {string} Use a custom fragment shader source for upscaling instead of the default one, which is based on AMD FidelityFX Super Resolution 1.0 (FSR).
+   * @param [options.experimental.upscaling.useTargetFrameRate=false] {boolean} Use target refresh frame rate for the canvas when rendering video frames rather than relying on HTMLVideoElement.requestVideoFrameCallback() function even if it's supported by the browser due to the fact that the callback can occasionally be fired one v-sync late.
    * @param [options.experimental.debug=false] {boolean} Print debug logs
    */
   constructor(options) {
@@ -142,6 +146,7 @@ class AnboxStream {
     this._containerID = options.targetElement;
     this._videoID = "anbox-stream-video-" + this._id;
     this._audioID = "anbox-stream-audio-" + this._id;
+    this._canvasID = "anbox-stream-canvas-" + this._id;
 
     // WebRTC
     this._webrtcManager = new AnboxWebRTCManager({
@@ -176,11 +181,33 @@ class AnboxStream {
       this._options.callbacks.requestMicrophoneAccess
     );
     this._webrtcManager.onIMEStateChanged(this._IMEStateChanged.bind(this));
+    this._webrtcManager.onDiscoverMessageReceived((msg) => {
+      if (this._streamCanvas) this._streamCanvas.setTargetFps(msg.fps);
+      if (msg.capabilities?.includes?.("vhal")) {
+        this._vhalManager = new AnboxVhalManager(this._webrtcManager);
+        this._webrtcManager.onVhalPropConfigsReceived(
+          this._vhalManager.onVhalPropConfigsReceived.bind(this._vhalManager)
+        );
+        this._webrtcManager.onVhalGetAnswerReceived(
+          this._vhalManager.onVhalGetAnswerReceived.bind(this._vhalManager)
+        );
+        this._webrtcManager.onVhalSetAnswerReceived(
+          this._vhalManager.onVhalSetAnswerReceived.bind(this._vhalManager)
+        );
+      }
+    });
+    this._webrtcManager.onControlChannelOpen(() => {
+      if (this._nullOrUndef(this._vhalManager)) return;
+      // Request all vhal prop configs from the server to populate the vhal
+      // manager cache
+      this._webrtcManager.sendControlMessage("vhal::get-all-prop-configs");
+    });
 
     // Control options
     this._modifierState = 0;
     this._dimensions = null;
     this._gamepadManager = null;
+    this._streamCanvas = null;
 
     this._originalOrientation = null;
     this._currentRotation = 0;
@@ -215,10 +242,10 @@ class AnboxStream {
   async connect() {
     if (this._options.fullScreen) this._requestFullscreen();
 
-    this._createMedia();
-
     let session = {};
     try {
+      // Create media in the try-catch block in case of an exception being thrown
+      this._createMedia();
       session = await this._options.connector.connect();
     } catch (e) {
       this._stopStreamingOnError(
@@ -304,6 +331,9 @@ class AnboxStream {
    *       all: Accept all candidates.
    *       relay: Only accept candidates whose IP are being relayed, such as via a TURN server.
    *   iceCandidatePoolSize: Size of the prefetched ICE candidate pool.
+   * experimental: Information on the experimental metrics.
+   *   canvas: Information on the WebGL-based canvas.
+   *     fps: Current frames per second on the rendering on the canavs.
    */
   showStatistics(enabled) {
     if (enabled) this._webrtcManager.showStatsOverlay();
@@ -453,6 +483,97 @@ class AnboxStream {
     );
   }
 
+  /**
+   * VHAL get call for multiple properties.
+   * @param properties {array} Array of objects, see below.
+   * @param properties.prop {Number} Property ID
+   * @param properties.area_id {Number} Area ID
+   * @param properties.int32_values {Array} Array of integers: required only for some properties.
+   * @param properties.float_values {Array} Array of floats: required only for some properties.
+   * @param properties.int64_values {Array} Array of integers: required only for some properties.
+   * @param properties.bytes {Array} Raw bytes value as array of integers: required only for some properties.
+   * @param properties.string_value {string} String value: required only for some properties.
+   */
+  async getVhalProperties(properties) {
+    if (this._nullOrUndef(this._vhalManager))
+      throw newError(
+        "vhal not supported",
+        ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED
+      );
+    return this._vhalManager.get(properties);
+  }
+
+  /**
+   * VHAL set call for multiple property values.
+   * At least one of int32_values, float_values, int64_values, bytes or
+   * string_value must be provided.
+   * @param properties {array} Array of objects, see below.
+   * @param properties.prop {Number} Property ID
+   * @param properties.area_id {Number} Area ID
+   * @param properties.status {Number} Property status
+   * @param properties.int32_values {Array} Array of integers
+   * @param properties.float_values {Array} Array of floats
+   * @param properties.int64_values {Array} Array of integers
+   * @param properties.bytes {Array} Raw bytes value as array of integers
+   * @param properties.string_value {string} String value
+   */
+  async setVhalProperties(properties) {
+    if (this._nullOrUndef(this._vhalManager))
+      throw newError(
+        "vhal not supported",
+        ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED
+      );
+    return this._vhalManager.set(properties);
+  }
+
+  /**
+   * Get VHAL property configs for the requested property IDs.
+   * Returns a copy of the stored configurations.
+   * @param props {Array} Array of property IDs.
+   */
+  getVhalPropConfigs(props) {
+    if (this._nullOrUndef(this._vhalManager))
+      throw newError(
+        "vhal not supported",
+        ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED
+      );
+    return this._vhalManager.getPropConfigs(props);
+  }
+
+  /**
+   * Get all VHAL property configs.
+   * Returns a copy of the stored configurations.
+   */
+  getAllVhalPropConfigs() {
+    if (this._nullOrUndef(this._vhalManager))
+      throw newError(
+        "vhal not supported",
+        ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED
+      );
+    return this._vhalManager.getAllPropConfigs();
+  }
+
+  /**
+   * Check if the VHAL functions are supported and available.
+   * Returns true if VHAL is supported and available, false otherwise.
+   */
+  isVhalAvailable() {
+    return !this._nullOrUndef(this._vhalManager);
+  }
+
+  _hasWebGLSupported() {
+    try {
+      const canvas = document.createElement("canvas");
+      const ctx =
+        canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+      if (this._nullOrUndef(ctx)) return false;
+    } catch (e) {
+      return false;
+    }
+
+    return true;
+  }
+
   _detectUnsupportedBrowser() {
     if (
       navigator.userAgent.indexOf("Chrome") === -1 &&
@@ -511,9 +632,9 @@ class AnboxStream {
 
     if (this._nullOrUndef(options.video)) options.video = {};
 
-    if (this._nullOrUndef(options.video.preferred_decoder_codecs))
+    if (this._nullOrUndef(options.video.preferred_decoder_codecs)) {
       options.video.preferred_decoder_codecs = [];
-    else {
+    } else {
       options.video.preferred_decoder_codecs.forEach((codec) => {
         const supported_codecs = ["AV1", "H264", "VP8", "VP9"];
         if (
@@ -582,6 +703,23 @@ class AnboxStream {
 
     if (this._nullOrUndef(options.experimental.emulatePointerEvent))
       options.experimental.emulatePointerEvent = true;
+
+    if (this._nullOrUndef(options.experimental.upscaling))
+      options.experimental.upscaling = {};
+
+    if (this._nullOrUndef(options.experimental.upscaling.enabled)) {
+      options.experimental.upscaling.enabled = false;
+    } else if (
+      options.experimental.upscaling.enabled &&
+      !this._hasWebGLSupported()
+    ) {
+      throw newError(
+        "can not enable upscaling due to lack of WebGL support",
+        ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED
+      );
+    }
+    if (this._nullOrUndef(options.experimental.upscaling.useTargetFrameRate))
+      options.experimental.upscaling.useTargetFrameRate = false;
 
     if (this._nullOrUndef(options.experimental.debug))
       options.experimental.debug = false;
@@ -678,7 +816,44 @@ class AnboxStream {
         this._registerControls();
         this._options.callbacks.ready();
       };
+      video.onloadedmetadata = () => {
+        // NOTE: the video frame may not be received or fully decoded yet
+        // when the onplay callback is fired, which may cause
+        // - WebGL to fail in reading first frames from the video element.
+        // - The video.videoWidth and video.videoHeight always stay to zero
+        //   when its display style is none (E.g. the upscaling is enabled)
+        // Hence we do not start rendering until metadata event is fired.
+        this._onResize();
+
+        if (
+          this._options.experimental.upscaling.enabled &&
+          this._streamCanvas
+        ) {
+          this._streamCanvas.startRendering();
+        }
+      };
       mediaContainer.appendChild(video);
+
+      const upscaling = this._options.experimental.upscaling;
+      if (upscaling.enabled) {
+        // Hide the video element and only make the canvas
+        // visible inside of the media container
+        video.style.display = "none";
+
+        this._streamCanvas = new AnboxStreamCanvas({
+          id: this._canvasID,
+          video: video,
+          useTargetFrameRate: upscaling.useTargetFrameRate,
+          fragmentShader: upscaling.fragmentShader,
+        });
+
+        this._streamCanvas.onFpsMeasured((fps) => {
+          this._webrtcManager.updateCanvasFpsStats(fps);
+        });
+
+        const canvas = this._streamCanvas.initialize();
+        mediaContainer.appendChild(canvas);
+      }
     }
 
     if (this._options.stream.audio && this._options.devices.speaker) {
@@ -699,6 +874,11 @@ class AnboxStream {
     if (this._options.stream.video) {
       const video = document.getElementById(this._videoID);
       video.srcObject = videoSource;
+
+      // Expliclity to call play() method to the video element if it's hidden,
+      // otherwise video can be still buffered but not playback, which caused
+      // the video.onplay callback won't be triggered at all.
+      if (video.style.display === "none") video.play();
     }
 
     if (this._options.stream.audio && this._options.devices.speaker) {
@@ -727,6 +907,13 @@ class AnboxStream {
 
     this._webrtcManager.stop();
     this._removeMedia();
+
+    if (this._options.experimental.upscaling.enabled) {
+      this._streamCanvas.stop();
+
+      const canvas = document.getElementById(this._canvasID);
+      if (canvas) canvas.remove();
+    }
 
     this._options.callbacks.done();
   }
@@ -941,6 +1128,7 @@ class AnboxStream {
     const video = document.getElementById(this._videoID);
     const container = document.getElementById(this._containerID);
     if (video === null || container === null) return;
+    if (video.videoWidth === 0 || video.videoHeight === 0) return;
 
     // We calculate the distance to the closest window border while keeping aspect ratio intact.
     let videoHeight = video.videoHeight;
@@ -979,26 +1167,34 @@ class AnboxStream {
     const playerHeight = Math.round(videoHeight * resizePercentage);
     const playerWidth = Math.round(videoWidth * resizePercentage);
 
+    let visualElement = video;
+    if (this._options.experimental.upscaling.enabled) {
+      visualElement = document.getElementById(this._canvasID);
+      // Adjust the viewport of WebGL inside of canvas to respect the
+      // dimension of the video element if the upscaling is enabled.
+      this._streamCanvas.resize(video.videoWidth, video.videoHeight);
+    }
+
     switch (this._currentRotation) {
       case 0:
       case 180:
-        video.style.height = playerHeight.toString() + "px";
-        video.style.width = playerWidth.toString() + "px";
-        video.style.top = `${Math.round(
+        visualElement.style.height = playerHeight.toString() + "px";
+        visualElement.style.width = playerWidth.toString() + "px";
+        visualElement.style.top = `${Math.round(
           container.clientHeight / 2 - playerHeight / 2
         )}px`;
-        video.style.left = `${Math.round(
+        visualElement.style.left = `${Math.round(
           container.clientWidth / 2 - playerWidth / 2
         )}px`;
         break;
       case 270:
       case 90:
-        video.style.height = playerWidth.toString() + "px";
-        video.style.width = playerHeight.toString() + "px";
-        video.style.top = `${Math.round(
+        visualElement.style.height = playerWidth.toString() + "px";
+        visualElement.style.width = playerHeight.toString() + "px";
+        visualElement.style.top = `${Math.round(
           container.clientHeight / 2 - playerWidth / 2
         )}px`;
-        video.style.left = `${Math.round(
+        visualElement.style.left = `${Math.round(
           container.clientWidth / 2 - playerHeight / 2
         )}px`;
         break;
@@ -1116,20 +1312,17 @@ class AnboxStream {
    */
   _adjustPointerCoordsToVideoBoundaries(event) {
     const container = document.getElementById(this._containerID);
-    if (!container) {
-      throw newError("invalid container", ANBOX_STREAM_SDK_ERROR_INTERNAL);
-    }
+    if (!container) return false;
 
     const dim = this._dimensions;
-    if (!dim) {
-      throw newError("SDK not ready", ANBOX_STREAM_SDK_ERROR_INTERNAL);
-    }
+    if (!dim) return false;
 
     const cRect = container.getBoundingClientRect();
     event.clientX = Math.round(
       event.clientX - cRect.left - dim.playerOffsetLeft
     );
     event.clientY = Math.round(event.clientY - cRect.top - dim.playerOffsetTop);
+    return true;
   }
 
   /**
@@ -1198,7 +1391,7 @@ class AnboxStream {
     if (this._options.controls.emulateTouch) event.pointerType = "touch";
 
     // Transform pointer coordinates so (0,0) corresponds to the top left corner of the video
-    this._adjustPointerCoordsToVideoBoundaries(event);
+    if (!this._adjustPointerCoordsToVideoBoundaries(event)) return;
 
     if (this._isPointerEventOutOfBounds(event)) {
       // In either of the following cases, ignore the events when
@@ -1795,6 +1988,129 @@ const _imeEventType = {
 
 const _maxTouchPointSize = 10;
 
+const _vertexShaderSource = `
+precision mediump float;
+
+attribute vec2 aVertexPos;
+attribute vec2 aTextureCoord;
+varying highp vec2 vTextureCoord;
+
+void main()
+{
+  vTextureCoord = aTextureCoord;
+  gl_Position = vec4(aVertexPos, 0.0, 1.0);
+}
+`;
+
+const _fragmentShaderSource = `/*
+  Original:https://www.shadertoy.com/view/stXSWB
+  by goingdigital
+
+* FidelityFX Super Resolution scales up a low resolution
+* image, while adding fine detail.
+*
+* MIT Open License
+*
+* https://gpuopen.com/fsr
+*
+* It works in two passes
+*   EASU upsamples the image with a clamped Lanczos kernel.
+*   RCAS sharpens the image at the target resolution.
+*/
+precision mediump float;
+
+uniform float sharpness;
+uniform vec2  uResolution;
+uniform sampler2D uSampler;
+varying highp vec2 vTextureCoord;
+
+/***** RCAS *****/
+#define FSR_RCAS_LIMIT (0.25-(1.0/16.0))
+//#define FSR_RCAS_DENOISE
+
+// Input callback prototypes that need to be implemented by calling shader
+vec4 FsrRcasLoadF(vec2 p);
+//------------------------------------------------------------------------------------------------------------------------------
+void FsrRcasCon(
+    out float con,
+    // The scale is {0.0 := maximum, to N>0, where N is the number of stops (halving) of the reduction of sharpness}.
+    float sharpness
+){
+    // Transform from stops to linear value.
+    con = exp2(-sharpness);
+}
+
+vec3 FsrRcasF(
+    vec2 texCoord, // Float pixel position in output.
+    float con
+)
+{
+    // Constant generated by RcasSetup().
+    // Algorithm uses minimal 3x3 pixel neighborhood.
+    //    b
+    //  d e f
+    //    h
+    vec2 sp = vec2(texCoord * uResolution.xy);
+    vec3 b = FsrRcasLoadF(sp + vec2( 0,-1)).rgb;
+    vec3 d = FsrRcasLoadF(sp + vec2(-1, 0)).rgb;
+    vec3 e = FsrRcasLoadF(sp).rgb;
+    vec3 f = FsrRcasLoadF(sp+vec2( 1, 0)).rgb;
+    vec3 h = FsrRcasLoadF(sp+vec2( 0, 1)).rgb;
+    // Luma times 2.
+    float bL = b.g + .5 * (b.b + b.r);
+    float dL = d.g + .5 * (d.b + d.r);
+    float eL = e.g + .5 * (e.b + e.r);
+    float fL = f.g + .5 * (f.b + f.r);
+    float hL = h.g + .5 * (h.b + h.r);
+    // Noise detection.
+    float nz = .25 * (bL + dL + fL + hL) - eL;
+    nz=clamp(
+        abs(nz)
+        /(
+            max(max(bL,dL),max(eL,max(fL,hL)))
+            -min(min(bL,dL),min(eL,min(fL,hL)))
+        ),
+        0., 1.
+    );
+    nz=1.-.5*nz;
+    // Min and max of ring.
+    vec3 mn4 = min(b, min(f, h));
+    vec3 mx4 = max(b, max(f, h));
+    // Immediate constants for peak range.
+    vec2 peakC = vec2(1., -4.);
+    // Limiters, these need to be high precision RCPs.
+    vec3 hitMin = mn4 / (4. * mx4);
+    vec3 hitMax = (peakC.x - mx4) / (4.* mn4 + peakC.y);
+    vec3 lobeRGB = max(-hitMin, hitMax);
+    float lobe = max(
+        -FSR_RCAS_LIMIT,
+        min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.)
+    )*con;
+    // Apply noise removal.
+    #ifdef FSR_RCAS_DENOISE
+    lobe *= nz;
+    #endif
+    // Resolve, which needs the medium precision rcp approximation to avoid visible tonality changes.
+    return (lobe * (b + d + h + f) + e) / (4. * lobe + 1.);
+}
+
+vec4 FsrRcasLoadF(vec2 p) {
+    return texture2D(uSampler, p/uResolution.xy);
+}
+
+void main()
+{
+    // Set up constants
+    float con;
+    float sharpness = 0.2;
+    FsrRcasCon(con,sharpness);
+
+    vec3 col = FsrRcasF(vTextureCoord, con);
+
+    gl_FragColor = vec4(col, 1.0);
+}
+`;
+
 class AnboxWebRTCManager {
   /**
    * Handle the signaling process to establish a WebRTC stream between a client
@@ -1810,7 +2126,7 @@ class AnboxWebRTCManager {
    * @param [options.enableVideoStream=true] {boolean} Enable video stream only when peer connection is established.
    * @param [options.deviceType] {string} Indicate the type of the device the SDK is running on
    * @param [options.foregroundActivity] {string} Activity to be displayed in the foreground. NOTE: it only works with an application that has APK provided on its creation.
-   * @param [options.preferredVideoDecoderCodecs] {string[]} List of perferred video decoder codecs that are used by the client.
+   * @param [options.preferredVideoDecoderCodecs] {string[]} List of preferred video decoder codecs that are used by the client.
    * @param [options.stats] {Object}
    * @param [options.stats.enable=false] {boolean} Enable collection of statistics. Not recommended in production
    * @param [options.stats.overlayID] {string} ID of the container in which the stat overlay will be displayed. Can be the stream container ID or something else.
@@ -1924,12 +2240,18 @@ class AnboxWebRTCManager {
         totalBytesSent: 0,
         codec: "",
       },
+      experimental: {
+        canvas: {
+          fps: 0,
+        },
+      },
     };
 
     this._lastReport = {
       video: {},
       audioOutput: {},
       audioInput: {},
+      canvas: {},
     };
 
     this._debugEnabled = options.debug;
@@ -1944,6 +2266,10 @@ class AnboxWebRTCManager {
     this._onMessage = () => {};
     this._onStatsUpdated = () => {};
     this._onIMEStateChanged = () => {};
+    this._onVhalPropConfigsReceived = () => {};
+    this._onVhalGetAnswerReceived = () => {};
+    this._onVhalSetAnswerReceived = () => {};
+    this._onControlChannelOpen = () => {};
   }
 
   /**
@@ -2139,6 +2465,7 @@ class AnboxWebRTCManager {
     stats.style.borderRadius = "3px";
     stats.style.lineHeight = "20px";
     stats.style.whiteSpace = "pre";
+    stats.style.zIndex = "1";
     // Ignore the pointer interaction on stats overlay
     stats.style.pointerEvents = "none";
     container.appendChild(stats);
@@ -2255,6 +2582,57 @@ class AnboxWebRTCManager {
 
     this._dataChans[channelName].send(data);
     return true;
+  }
+
+  /**
+   * Update the Canvas FPS measurement
+   * NOTE: only use this when upscaling is enabled
+   */
+  updateCanvasFpsStats(fps) {
+    this._stats.experimental.canvas.fps = fps;
+  }
+
+  onDiscoverMessageReceived(callback) {
+    if (typeof callback === "function") this._discoverMsgReceived = callback;
+  }
+
+  /**
+   * Register a new callback which is fired when VHAL prop configs are received
+   * on the control channel. This replaces the previous callback.
+   * @param callback {function} Function to use for the callback
+   */
+  onVhalPropConfigsReceived(callback) {
+    if (typeof callback === "function")
+      this._onVhalPropConfigsReceived = callback;
+  }
+
+  /**
+   * Register a new callback which is fired when a VHAL get answer is received
+   * on the control channel. This replaces the previous callback.
+   * @param callback {function} Function to use for the callback
+   */
+  onVhalGetAnswerReceived(callback) {
+    if (typeof callback === "function")
+      this._onVhalGetAnswerReceived = callback;
+  }
+
+  /**
+   * Register a new callback which is fired when a VHAL set answer is received
+   * on the control channel. This replaces the previous callback.
+   * @param callback {function} Function to use for the callback
+   */
+  onVhalSetAnswerReceived(callback) {
+    if (typeof callback === "function")
+      this._onVhalSetAnswerReceived = callback;
+  }
+
+  /**
+   * Register a new callback which is fired when the control channel is open.
+   * This replaces the previous callback.
+   * @param callback {function} Function to use for the callback
+   */
+  onControlChannelOpen(callback) {
+    if (typeof callback === "function") this._onControlChannelOpen = callback;
   }
 
   _log(msg) {
@@ -2390,6 +2768,7 @@ class AnboxWebRTCManager {
 
   _createControlChannel() {
     this._controlChan = this._pc.createDataChannel("control");
+    this._controlChan.onopen = this._onControlChannelOpen;
     this._controlChan.onmessage = this._onControlMessageReceived.bind(this);
     this._controlChan.onerror = (err) => {
       if (this._controlChan !== null) {
@@ -2481,6 +2860,8 @@ class AnboxWebRTCManager {
         if (this._discoverTimeout === null) return;
 
         this._stopDiscoverTimeout();
+
+        this._discoverMsgReceived(msg);
 
         if (this._apiVersionInUse > msg.max_api_version) {
           if (this._fallbackApiVersion > msg.max_api_version) {
@@ -2627,6 +3008,18 @@ class AnboxWebRTCManager {
 
       case "hide-ime":
         this._onIMEStateChanged(false);
+        break;
+
+      case "vhal-prop-configs":
+        this._onVhalPropConfigsReceived(JSON.parse(msg.data));
+        break;
+
+      case "vhal-get-answer":
+        this._onVhalGetAnswerReceived(JSON.parse(msg.data));
+        break;
+
+      case "vhal-set-answer":
+        this._onVhalSetAnswerReceived(JSON.parse(msg.data));
         break;
 
       default:
@@ -3135,6 +3528,329 @@ class AnboxWebRTCManager {
     );
     insertStat("packetsReceived", this._stats.audioOutput.packetsReceived);
     insertStat("packetsLost", this._stats.audioOutput.packetsLost);
+
+    if (this._stats.experimental.canvas.fps > 0) {
+      insertHeader("Canvas");
+      insertStat("fps", this._stats.experimental.canvas.fps);
+    }
+  }
+}
+
+class AnboxStreamCanvas {
+  _nullOrUndef(obj) {
+    return obj === null || obj === undefined;
+  }
+
+  /**
+   * AnboxStreamCanvas is used internally by AnboxStream only
+   * for video streaming upscaling purpose.
+   */
+  constructor(options) {
+    if (this._nullOrUndef(options)) throw Error("missing options");
+
+    if (this._nullOrUndef(options.id)) {
+      throw newError("missing canvas id", ANBOX_STREAM_SDK_ERROR_INTERNAL);
+    }
+    this._canvasID = options.id;
+
+    if (this._nullOrUndef(options.video)) {
+      throw newError("missing video element", ANBOX_STREAM_SDK_ERROR_INTERNAL);
+    }
+    this._video = options.video;
+
+    if (this._nullOrUndef(options.useTargetFrameRate)) {
+      throw newError(
+        "missing frame rate option",
+        ANBOX_STREAM_SDK_ERROR_INTERNAL
+      );
+    }
+
+    this._lastRenderTime = 0;
+    this._lastSampleTime = 0;
+    this._frameCount = 0;
+    this._fpsMeasumentlTimerId = 0;
+    this._fpsInterval = 1000 / 60;
+    this._useTargetFrameRate = options.useTargetFrameRate;
+    this._fragmentShader = options.fragmentShader;
+
+    // Canvas
+    this._webgl = null;
+    this._program = null;
+    this._texture = null;
+    this._buffers = {};
+  }
+
+  initialize() {
+    const canvas = document.createElement("canvas");
+    canvas.style.margin = "0";
+    canvas.style.position = "absolute";
+    canvas.id = this._canvasID;
+
+    const gl = canvas.getContext("webgl");
+    const program = this._loadShaders(gl);
+    if (this._nullOrUndef(program)) {
+      throw newError(
+        "Failed to load shader program",
+        ANBOX_STREAM_SDK_ERROR_INTERNAL
+      );
+    }
+    this._program = program;
+
+    this._texture = this._initializeTexture(gl);
+    this._buffers = this._initializeBuffer(gl);
+
+    this._webgl = gl;
+    // WebGL specific: flips the source data along its vertical axis,
+    // otherwise Y-axis is flipped.
+    this._webgl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+    return canvas;
+  }
+
+  startRendering() {
+    // In case the efficient per-video-frame operation
+    // 'requestVideoFrameCallback' is supported
+    if (
+      "requestVideoFrameCallback" in HTMLVideoElement.prototype &&
+      !this._useTargetFrameRate
+    ) {
+      this._refreshOnCallback();
+    } else {
+      this._refreshOnInterval();
+    }
+
+    this._measureFps();
+  }
+
+  setTargetFps(fps) {
+    if (!this._nullOrUndef(fps) && fps > 0) this._fpsInterval = 1000 / fps;
+  }
+
+  stop() {
+    window.clearInterval(this._fpsMeasumentlTimerId);
+  }
+
+  resize(width, height) {
+    const canvas = document.getElementById(this._canvasID);
+    if (canvas) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+  }
+
+  onFpsMeasured(callback) {
+    if (typeof callback === "function") this._fpsMeasured = callback;
+  }
+
+  _measureFps() {
+    this._fpsMeasumentlTimerId = window.setInterval(() => {
+      let now = performance.now();
+      if (this._frameCount > 0) {
+        let elapsed = now - this._lastSampleTime;
+        const currentFps = ((this._frameCount / elapsed) * 1000).toFixed(2);
+        if (!this._nullOrUndef(this._fpsMeasured))
+          this._fpsMeasured(currentFps);
+
+        this._frameCount = 0;
+      }
+      this._lastSampleTime = now;
+    }, 1000);
+  }
+
+  _refreshOnCallback() {
+    const refresh = () => {
+      this._render(this._webgl);
+      this._video.requestVideoFrameCallback(refresh);
+    };
+    this._video.requestVideoFrameCallback(refresh);
+  }
+
+  _refreshOnInterval(now) {
+    requestAnimationFrame(this._refreshOnInterval.bind(this));
+
+    let elapsed = now - this._lastRenderTime;
+    if (elapsed > this._fpsInterval) {
+      // In case the timing that the refresh callback get invoked
+      // by the browser is not multiple of the fps interval.
+      this._lastRenderTime = now - (elapsed % this._fpsInterval);
+      this._render(this._webgl);
+    }
+  }
+
+  _loadShaders(gl) {
+    const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+    const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+
+    gl.shaderSource(vertexShader, _vertexShaderSource);
+
+    gl.compileShader(vertexShader);
+    if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+      console.error(
+        `failed to compile vertex shader: ${gl.getShaderInfoLog(vertexShader)}`
+      );
+      return null;
+    }
+
+    let fragmentShaderSource = _fragmentShaderSource;
+    if (
+      !this._nullOrUndef(this._fragmentShader) &&
+      this._fragmentShader.trim().length > 0
+    )
+      fragmentShaderSource = this._fragmentShader.trim();
+    gl.shaderSource(fragmentShader, fragmentShaderSource);
+    gl.compileShader(fragmentShader);
+    if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+      console.error(
+        `failed to compile fragment shader: ${gl.getShaderInfoLog(
+          fragmentShader
+        )}`
+      );
+      return null;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error(`failed to link program: ${gl.getProgramInfoLog(program)}`);
+      return null;
+    }
+
+    gl.validateProgram(program);
+    if (!gl.getProgramParameter(program, gl.VALIDATE_STATUS)) {
+      console.error(
+        `failed to validate program: ${gl.getProgramInfoLog(program)}`
+      );
+      return null;
+    }
+
+    return program;
+  }
+
+  _initializeTexture(gl) {
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+
+    // Create a dummy texture for the placeholder and update it later
+    // by reading the video frame from the video element via gl.texImage2D
+    const width = 1;
+    const height = 1;
+    const pixel = new Uint8Array([0, 0, 0, 255]);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      width,
+      height,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      pixel
+    );
+
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+    return texture;
+  }
+
+  _initializeBuffer(gl) {
+    // Create the vertex buffer
+    // Disable the ESLint rule for better readability
+    /* eslint-disable */
+    const vertices = [
+      // postion   // texture coordinate
+      -1.0, 1.0,   0.0, 1.0,
+      -1.0, -1.0,  0.0, 0.0,
+      1.0,  -1.0,  1.0, 0.0,
+      1.0,  1.0,   1.0, 1.0,
+    ];
+    /* eslint-enable */
+
+    const vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+    // Create the index buffer
+    const indexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    const indices = [0, 1, 2, 0, 2, 3];
+    gl.bufferData(
+      gl.ELEMENT_ARRAY_BUFFER,
+      new Uint16Array(indices),
+      gl.STATIC_DRAW
+    );
+
+    return {
+      vertices: vertexBuffer,
+      indices: indexBuffer,
+    };
+  }
+
+  _render(gl) {
+    // Update viewport in case that the window resize happens
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+    gl.clearColor(0.0, 0.0, 0.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffers.vertices);
+
+    let positionAttribLocation = gl.getAttribLocation(
+      this._program,
+      "aVertexPos"
+    );
+    gl.vertexAttribPointer(
+      positionAttribLocation,
+      2,
+      gl.FLOAT,
+      gl.FALSE,
+      4 * Float32Array.BYTES_PER_ELEMENT,
+      0
+    );
+    gl.enableVertexAttribArray(positionAttribLocation);
+
+    let texCoordAttribLocation = gl.getAttribLocation(
+      this._program,
+      "aTextureCoord"
+    );
+    gl.vertexAttribPointer(
+      texCoordAttribLocation,
+      2,
+      gl.FLOAT,
+      gl.FALSE,
+      4 * Float32Array.BYTES_PER_ELEMENT,
+      2 * Float32Array.BYTES_PER_ELEMENT // offset for texture coordinate in vertices
+    );
+    gl.enableVertexAttribArray(texCoordAttribLocation);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._buffers.indices);
+
+    let uSampler = gl.getUniformLocation(this._program, "uSampler");
+    let uResolution = gl.getUniformLocation(this._program, "uResolution");
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this._texture);
+
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      this._video
+    );
+
+    gl.useProgram(this._program);
+
+    gl.uniform1i(uSampler, 0);
+    gl.uniform2f(uResolution, gl.canvas.width, gl.canvas.height);
+
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+
+    this._frameCount++;
   }
 }
 
@@ -3279,7 +3995,7 @@ class AnboxStreamGatewayConnector {
     });
     if (rawResp === undefined || rawResp.status !== 201)
       throw newError(
-        "Failed to create session",
+        "failed to create session",
         ANBOX_STREAM_SDK_ERROR_SESSION_FAILED
       );
 
@@ -3332,6 +4048,175 @@ class AnboxStreamGatewayConnector {
 
   // no-op
   disconnect() {}
+}
+
+class AnboxVhalManager {
+  _nullOrUndef(obj) {
+    return obj === null || obj === undefined;
+  }
+
+  /**
+   * Emulate Promise.withResolvers() if not available.
+   * See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/withResolvers
+   */
+  _promiseWithResolvers() {
+    if (typeof Promise.withResolvers === "function")
+      return Promise.withResolvers();
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise: promise, resolve: resolve, reject: reject };
+  }
+
+  /**
+   * Constructor to initialize a new instance of the AnboxVhalManager which is
+   * responsible to communicate with an Android VHAL.
+   * @param webrtcManager {object} Anbox WebRTCManager object
+   * @param [timeout=1000] {number} How long to wait for an answer for the VHAL calls (in milliseconds).
+   */
+  constructor(webrtcManager, timeout = 1000) {
+    this._webrtcManager = webrtcManager;
+    this._timeout = timeout;
+    this._waitingRequestsGet = [];
+    this._waitingRequestsSet = [];
+  }
+
+  /**
+   * VHAL get call for multiple properties.
+   * @param properties {array} Array of objects, see below.
+   * @param properties.prop {Number} Property ID
+   * @param properties.area_id {Number} Area ID
+   * @param properties.int32_values {Array} Array of integers: required only for some properties.
+   * @param properties.float_values {Array} Array of floats: required only for some properties.
+   * @param properties.int64_values {Array} Array of integers: required only for some properties.
+   * @param properties.bytes {Array} Raw bytes value as array of integers: required only for some properties.
+   * @param properties.string_value {string} String value: required only for some properties.
+   */
+  async get(properties) {
+    return this._getOrSet("get", properties);
+  }
+
+  /**
+   * VHAL set call for multiple property values.
+   * At least one of int32_values, float_values, int64_values, bytes or
+   * string_value must be provided.
+   * @param properties {array} Array of objects, see below.
+   * @param properties.prop {Number} Property ID
+   * @param properties.area_id {Number} Area ID
+   * @param properties.status {Number} Property status
+   * @param properties.int32_values {Array} Array of integers
+   * @param properties.float_values {Array} Array of floats
+   * @param properties.int64_values {Array} Array of integers
+   * @param properties.bytes {Array} Raw bytes value as array of integers
+   * @param properties.string_value {string} String value
+   */
+  async set(properties) {
+    return this._getOrSet("set", properties);
+  }
+
+  /**
+   * Get VHAL property configs for the requested property IDs.
+   * Returns a copy of the stored configurations.
+   * @param props {Array} Array of property IDs.
+   */
+  getPropConfigs(props) {
+    if (this._nullOrUndef(this._configStore)) return [];
+    const arr = [];
+    for (const prop of props) {
+      const config = this._configStore.get(prop);
+      if (config != null) arr.push(JSON.parse(JSON.stringify(config)));
+    }
+    return arr;
+  }
+
+  /**
+   * Get all VHAL property configs.
+   * Returns a copy of the stored configurations.
+   */
+  getAllPropConfigs() {
+    if (this._nullOrUndef(this._configStore)) return [];
+    // Deep copy of the config store values
+    return JSON.parse(JSON.stringify(Array.from(this._configStore.values())));
+  }
+
+  /**
+   * Helper function for sending a get or set command.
+   * @param command {string} Command name. Must be lowercase 'set' or 'get'.
+   * @param properties {array} Array of objects, see get or set.
+   */
+  async _getOrSet(command, properties) {
+    // Validate properties array
+    if (!properties.every((property) => property.prop != null))
+      throw newError(
+        "must provide property ID for all properties",
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+      );
+
+    const timeout = new Promise((_r, reject) => {
+      setTimeout(
+        () =>
+          reject(
+            newError(`timeout while waiting for answer to ${command} request`),
+            ANBOX_STREAM_SDK_ERROR_TIMEOUT
+          ),
+        this._timeout
+      );
+    });
+
+    const promises = [];
+    for (const property of properties) {
+      promises.push(this._getOrSetSingle(command, property));
+    }
+
+    const promise = Promise.all(promises);
+    return Promise.race([promise, timeout]);
+  }
+
+  /**
+   * Helper function for sending a single get or set command.
+   * We need this while Anbox does not have support for multi get/multi set.
+   * @param command {string} Command name. Must be lowercase 'set' or 'get'.
+   * @param properties {Object} See get or set for the fields.
+   */
+  async _getOrSetSingle(command, property) {
+    const promise = this._promiseWithResolvers();
+    const titleCaseCommand =
+      command.charAt(0).toUpperCase() + command.substring(1);
+    const queueName = `_waitingRequests${titleCaseCommand}`;
+    this[queueName].push(promise);
+
+    this._sendRequest(command, property);
+    return promise.promise;
+  }
+
+  /**
+   * Helper function for sending a VHAL command.
+   * @param command {string} Command name. Must be lowercase 'set' or 'get'.
+   * @param data {object} Data to send through the channel.
+   */
+  _sendRequest(command, data) {
+    if (!this._webrtcManager.sendControlMessage(`vhal::${command}`, data))
+      throw newError(
+        `error when sending ${command} call through control channel`,
+        ANBOX_STREAM_SDK_ERROR_WEBRTC_CONTROL_FAILED
+      );
+  }
+
+  onVhalPropConfigsReceived(propConfigs) {
+    this._configStore = new Map(
+      propConfigs.map((config) => [config.prop, config])
+    );
+  }
+
+  onVhalGetAnswerReceived(getAnswer) {
+    this._waitingRequestsGet.shift()?.resolve(getAnswer);
+  }
+
+  onVhalSetAnswerReceived(setAnswer) {
+    this._waitingRequestsSet.shift()?.resolve(setAnswer);
+  }
 }
 
 window.AnboxStreamGatewayConnector = AnboxStreamGatewayConnector;
