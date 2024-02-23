@@ -57,7 +57,7 @@ done
 sed -i "s/@VERSION@/${VERSION}/" js/anbox-stream-sdk.js
 
 # Only copy the JS SDK and markdown file to the js folder
-cp js/anbox-stream-docs.md  js/anbox-stream-sdk.js "$sdkdir"/js/
+cp js/README.md  js/anbox-stream-sdk.js "$sdkdir"/js/
 for f in android js ; do
   cp -r examples/"$f" "$sdkdir"/examples
 done

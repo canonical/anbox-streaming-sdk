@@ -198,7 +198,7 @@ examples/js/README.md
 examples/js/example.html
 examples/js/serve.py
 js/anbox-stream-sdk.js
-js/anbox-stream-docs.md
+js/README.md
 examples/android/apks/com.canonical.anbox.streaming_sdk.enhanced_webview_example_%s.apk
 examples/android/apks/com.canonical.anboxcloud.outofbandappv2_%s.apk
 android/libs/com.canonical.anbox.streaming_sdk.aar
