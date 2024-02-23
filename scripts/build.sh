@@ -89,17 +89,15 @@ fi
    # Create a symbol link for anbox_streaming_sdk to example/android folder so that we
    # can create the sdk library alongside with Android example when building the APKs.
    cp -av "$topdir"/android/anbox_streaming_sdk "$topdir"/examples/android/anbox_streaming_sdk;
-   cd examples;
-   scripts/build-with-docker.sh --proxy="${PROXY}" \
+   "$topdir"/scripts/build-with-docker.sh --proxy="${PROXY}" \
      --version="${VERSION}" \
      --anbox-stream-sdk="$builddir"
 
     # To repack zip taball which includes APKs file later
-    mkdir_cp results/*.apk "$sdkname"/examples/android/apks;
-    mv results/*.apk "$topdir";
+    mkdir_cp assets/*.apk "$sdkname"/examples/android/apks;
     # To repack zip taball which includes JAR/AAR files built during the docker runtime
-    mkdir_cp results/*.aar "$sdkname"/android/libs
-    mkdir_cp results/*.aar "$sdkname"/examples/android/enhanced_webview_streaming/app/libs
+    mkdir_cp assets/*.aar "$sdkname"/android/libs
+    mkdir_cp assets/*.aar "$sdkname"/examples/android/enhanced_webview_streaming/app/libs
 
     if [ "$CREATE_TARBALL" = true ]; then
       zip -r "$topdir"/"$sdkname".zip "$sdkname"/examples/android/apks/*.apk "$sdkname"/android/libs/*.aar \
@@ -117,6 +115,6 @@ fi
       "$topdir"/scripts/validate.sh --sdk-path="$sdkdir" \
         --allowlist="$topdir"/scripts/streaming-sdk-files.allowlist
 
-      mv "$builddir" "$topdir"/results
+      mv "$sdkdir" "$topdir"/results
     fi
 )

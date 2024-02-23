@@ -27,7 +27,7 @@ done
 
 sudo apt-get update -qq
 sudo apt-get clean
-cd /work/src
+cd /work/src/examples
 
 # For Anbox Streaming SDK library(AAR)
 (

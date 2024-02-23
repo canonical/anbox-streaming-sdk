@@ -136,20 +136,17 @@ EOF
 fi
 
 docker build -t "$DOCKER_IMAGE_NAME":"$DOCKER_IMAGE_TAG" .
-cd $workdir && mkdir results
-
+cd "$workdir" && mkdir -p assets
 builddir=$(mktemp -p "$PWD" -d .build.XXXXXX)
 cleanup() {
 	rm -rf "$builddir"
 }
 trap cleanup INT EXIT TERM
 
-cp -ra "$sdk" "$builddir"/sdk
-cp -ra * "$builddir"
-
+cp -ra "$sdk" examples scripts "$builddir"
 docker run --rm \
   --network host \
-  -v "$PWD"/results:/work \
+  -v "$PWD"/assets:/work \
   -v $builddir:/work/src \
   -u $(id -u $USER) \
   "$DOCKER_IMAGE_NAME":"$DOCKER_IMAGE_TAG" \
