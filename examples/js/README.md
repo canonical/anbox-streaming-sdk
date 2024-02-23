@@ -1,4 +1,4 @@
-# Anbox Stream SDK Example
+# Anbox Streaming SDK Example
 
 This directory contains the bare minimum to start a stream on the Anbox Streaming Stack.
 

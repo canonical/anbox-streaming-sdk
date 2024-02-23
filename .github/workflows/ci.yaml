@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  schedule:
+    # execute the action nightly
+    - cron: '0 10 * * *'
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+      with:
+        # to avoid shadow clone which would impact the version generation
+        # See `scripts/gen-version.sh`
+        fetch-depth: "0"
+
+    - name: Get version
+      id: get-version
+      run: |
+        echo "version=$(./scripts/gen-version.sh)" >> $GITHUB_OUTPUT
+
+    - name: Build
+      run: |
+        ./scripts/build.sh
+
+    - name: Run tests
+      run: |
+        ./scripts/run-tests.sh
+
+    - name: Collect artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: anbox-streaming-sdk_${{ steps.get-version.outputs.version }}
+        if-no-files-found: error
+        path: results/
