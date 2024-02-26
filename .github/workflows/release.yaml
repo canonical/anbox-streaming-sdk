@@ -1,9 +1,11 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - '[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for the release'
+        required: true
 
 # To publish assets to on GitHub release pages
 permissions:
@@ -14,6 +16,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Create tag
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo } = context.repo;
+          await github.rest.git.createRef({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: 'refs/tags/${{ inputs.tag_name }}',
+            sha: context.sha
+          })
+
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
@@ -38,3 +52,4 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: anbox-streaming-sdk_${{ steps.get-version.outputs.version }}.zip
+        tag_name: ${{ steps.get-version.outputs.version }}
