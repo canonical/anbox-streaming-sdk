@@ -126,6 +126,7 @@ class AnboxStream {
    * @param [options.experimental.upscaling.fragmentShader] {string} Use a custom fragment shader source for upscaling instead of the default one, which is based on AMD FidelityFX Super Resolution 1.0 (FSR).
    * @param [options.experimental.upscaling.useTargetFrameRate=false] {boolean} Use target refresh frame rate for the canvas when rendering video frames rather than relying on HTMLVideoElement.requestVideoFrameCallback() function even if it's supported by the browser due to the fact that the callback can occasionally be fired one v-sync late.
    * @param [options.experimental.debug=false] {boolean} Print debug logs
+   * @param [options.experimental.pointerLock=false] {boolean} Pointer lock provides input events based on the movement of the mouse over time, not the absolute position. If enabled, the mouse will be locked to the stream view.
    */
   constructor(options) {
     if (this._nullOrUndef(options)) {
@@ -723,6 +724,9 @@ class AnboxStream {
 
     if (this._nullOrUndef(options.experimental.debug))
       options.experimental.debug = false;
+
+    if (this._nullOrUndef(options.experimental.pointerLock))
+      options.experimental.pointerLock = false;
   }
 
   _validateApiVersion(version) {
@@ -796,6 +800,8 @@ class AnboxStream {
     // Disable native controls for touch events (zooming, panning)
     mediaContainer.style.touchAction = "none";
 
+    let pointerLockElement = null;
+
     if (this._options.stream.video) {
       const video = document.createElement("video");
       video.style.margin = "0";
@@ -834,6 +840,8 @@ class AnboxStream {
       };
       mediaContainer.appendChild(video);
 
+      pointerLockElement = video;
+
       const upscaling = this._options.experimental.upscaling;
       if (upscaling.enabled) {
         // Hide the video element and only make the canvas
@@ -853,6 +861,7 @@ class AnboxStream {
 
         const canvas = this._streamCanvas.initialize();
         mediaContainer.appendChild(canvas);
+        pointerLockElement = canvas;
       }
     }
 
@@ -867,6 +876,12 @@ class AnboxStream {
         };
       }
       mediaContainer.appendChild(audio);
+    }
+
+    if (this._options.experimental.pointerLock && pointerLockElement !== null) {
+      pointerLockElement.addEventListener("click", async () => {
+        await pointerLockElement.requestPointerLock({});
+      });
     }
   }
 
@@ -1360,6 +1375,14 @@ class AnboxStream {
   _onPointerEvent(pointerEvent) {
     pointerEvent.preventDefault();
 
+    // If pointer lock is used but not active dismiss all events until the
+    // lock is active again
+    if (
+      this._options.experimental.pointerLock &&
+      this._nullOrUndef(document.pointerLockElement)
+    )
+      return;
+
     // The pointerEvent.pointerId increments every time when a new touch point
     // is pressed(can be used to differentiate the touch point from others,
     // However the downside of this is that it can not be used as the MT slot
@@ -1453,12 +1476,15 @@ class AnboxStream {
         y: event.clientY,
       });
     } else if (event.type === "pointermove" && event.pointerType === "mouse") {
-      this._sendInputEvent("mouse-move", {
-        x: event.clientX,
-        y: event.clientY,
+      var e = {
         rx: event.movementX,
         ry: event.movementY,
-      });
+      };
+      if (!this._options.experimental.pointerLock) {
+        e.x = event.clientX;
+        e.y = event.clientY;
+      }
+      this._sendInputEvent("mouse-move", e);
     } else if (event.type === "pointerdown" && event.pointerType === "touch") {
       const index = this._activeTouchPointers.indexOf(event.pointerId);
       if (index === -1) this._activeTouchPointers.push(event.pointerId);

@@ -130,11 +130,11 @@ test('can process keyboard events', () => {
 })
 
 test('can process mouse button events', () => {
-  sdkOptions.experimental = {
+  let opts = { ...sdkOptions }
+  opts.experimental = {
       emulatePointerEvent: false
   }
-
-  let stream = setupStream(sdkOptions)
+  let stream = setupStream(opts)
 
   let mockFn = jest.fn(() => { return true })
   stream._webrtcManager.sendControlMessage = mockFn
@@ -187,6 +187,37 @@ test('can process mouse move events', () => {
   expect(mockFn.mock.calls.length).toEqual(1)
   expect(mockFn.mock.calls[0][0]).toEqual('input::mouse-move')
   expect(mockFn.mock.calls[0][1]).toEqual({x: 250, y: 500, rx: 25, ry: 50})
+})
+
+test('can process mouse move events with pointer lock', () => {
+  let opts = { ...sdkOptions }
+  opts.experimental = {
+    pointerLock: true
+  }
+  let stream = setupStream(opts)
+
+  let mockFn = jest.fn(() => { return true })
+  stream._webrtcManager.sendControlMessage = mockFn
+  stream._registerControls()
+  stream._onResize()
+  const container = document.getElementById(stream._containerID)
+
+  document.pointerLockElement = {}
+
+  const event = new PointerEvent('pointermove', {
+    clientX: 1000,
+    clientY: 1000,
+    pointerType: 'mouse'
+  })
+  event.__defineGetter__('movementX', () => 50);
+  event.__defineGetter__('movementY', () => 100);
+  container.dispatchEvent(event)
+
+  expect(mockFn.mock.calls.length).toEqual(1)
+  expect(mockFn.mock.calls[0][0]).toEqual('input::mouse-move')
+  // With pointer lock enabled we should only see movement information
+  // and absolute position
+  expect(mockFn.mock.calls[0][1]).toEqual({rx: 25, ry: 50})
 })
 
 test('can process mouse events translated to touch events', () => {
@@ -591,10 +622,11 @@ test('multiple touch events with increment id', () => {
 })
 
 test('ignore touch events outside of video element', () => {
-  sdkOptions.experimental = {
+  let opts = { ...sdkOptions }
+  opts.experimental = {
       emulatePointerEvent: false
   }
-  let stream = setupStream(sdkOptions)
+  let stream = setupStream(opts)
 
   let mockFn = jest.fn(() => { return true })
   stream._webrtcManager.sendControlMessage = mockFn
@@ -613,10 +645,11 @@ test('ignore touch events outside of video element', () => {
 })
 
 test('trigger pointer events when inputs leave the video container', () => {
-  sdkOptions.experimental = {
+  let opts = { ...sdkOptions }
+  opts.experimental = {
       emulatePointerEvent: true
   }
-  let stream = setupStream(sdkOptions)
+  let stream = setupStream(opts)
 
   let mockFn = jest.fn(() => { return true })
   stream._webrtcManager.sendControlMessage = mockFn
