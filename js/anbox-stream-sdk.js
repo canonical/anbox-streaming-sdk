@@ -110,6 +110,7 @@ class AnboxStream {
    * @param [options.callbacks.statsUpdated=none] {function} Called when the overall webrtc peer connection statistics are updated.
    * @param [options.callbacks.requestCameraAccess=none] {function} Called when Android application tries to open camera device for video streaming.
    * @param [options.callbacks.requestMicrophoneAccess=none] {function} Called when Android application tries to open microphone device for video streaming.
+   * @param [options.callbacks.vhalReady=none] {function} Called when the VHAL manager has been initialised.
    * @param [options.dataChannels] {object} Map of data channels used to exchange out of band data between WebRTC client and application running in Android container.
    * @param [options.dataChannels[name].callbacks] {object} A list of event handling callbacks of one specific data channel.
    * @param [options.dataChannels[name].callbacks.open=none] {function} A callback function that is triggered when the data channel is opened.
@@ -195,6 +196,7 @@ class AnboxStream {
         this._webrtcManager.onVhalSetAnswerReceived(
           this._vhalManager.onVhalSetAnswerReceived.bind(this._vhalManager)
         );
+        this._options.callbacks.vhalReady();
       }
     });
     this._webrtcManager.onControlChannelOpen(() => {
@@ -667,6 +669,9 @@ class AnboxStream {
 
     if (this._nullOrUndef(options.callbacks.requestMicrophoneAccess))
       options.callbacks.requestMicrophoneAccess = () => false;
+
+    if (this._nullOrUndef(options.callbacks.vhalReady))
+      options.callbacks.vhalReady = () => {};
 
     if (!this._nullOrUndef(options.dataChannels)) {
       if (Object.keys(options.dataChannels).length > maxNumberOfDataChannels) {
