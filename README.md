@@ -37,6 +37,10 @@ We welcome contributions from the community to enhance the Anbox Streaming SDK. 
 
 Our team will review your contribution and collaborate with you to integrate it into the SDK.
 
+## Bug report
+
+To report issues, please submit a [bug](https://bugs.launchpad.net/anbox-cloud/+filebug) to Anbox Cloud project on launchpad.
+
 ## License
 
 The Anbox Streaming SDK is licensed under the Apache License 2.0. For more details, refer to the [LICENSE](LICENSE) file for details.
