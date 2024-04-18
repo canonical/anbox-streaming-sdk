@@ -18,9 +18,6 @@
  * limitations under the License.
  */
 
-// Error code returned when an unknown signaling request has been received
-const ANBOX_STREAM_SIGNALING_ERROR_BAD_REQUEST = 5;
-
 // Error return when the actual error is unknown
 export const ANBOX_STREAM_SDK_ERROR_UNKNOWN = 0;
 // Error returned when an invalid argument was provided
@@ -55,8 +52,6 @@ export const ANBOX_STREAM_SDK_ERROR_WEBRTC_DISCONNECTED = 14;
 
 // The maximum supported client API version
 export const ANBOX_STREAM_SDK_MAX_CLIENT_API_VERSION = 2;
-// The current fallback client API version
-export const ANBOX_STREAM_SDK_FALLBACK_CLIENT_API_VERSION = 1;
 
 // See https://datatracker.ietf.org/doc/html/rfc4960#section-3.3.10
 const SCP_CAUSE_CODE_USER_INITIATED_ABORT = 12;
@@ -84,7 +79,6 @@ class AnboxStream {
    * @param [options.deviceType] {string} Send the type of device the SDK is running on to the Android container.
    * @param [options.enableStats] {boolean} Enable collection of statistics. Not recommended in production.
    * @param [options.apiVersion=2] {integer} API version to use.
-   * @param [options.fallbackApiVersion=1] {integer} API version to fallback to in case the intended one is not supported.
    * @param [options.stream] {object} Configuration settings for the streaming.
    * @param [options.stream.video=true] {boolean} Enable video stream when starting streaming.
    * @param [options.stream.audio=true] {boolean} Enable audio stream when starting streaming.
@@ -153,7 +147,6 @@ class AnboxStream {
     // WebRTC
     this._webrtcManager = new AnboxWebRTCManager({
       apiVersion: this._options.apiVersion,
-      fallbackApiVersion: this._options.fallbackApiVersion,
       enableSpeakers: this._options.devices.speaker,
       enableMic: this._options.devices.microphone,
       enableCamera: this._options.devices.camera,
@@ -593,9 +586,6 @@ class AnboxStream {
     if (this._nullOrUndef(options.apiVersion))
       options.apiVersion = ANBOX_STREAM_SDK_MAX_CLIENT_API_VERSION;
 
-    if (this._nullOrUndef(options.fallbackApiVersion))
-      options.fallbackApiVersion = ANBOX_STREAM_SDK_FALLBACK_CLIENT_API_VERSION;
-
     if (this._nullOrUndef(options.fullScreen)) options.fullScreen = false;
 
     if (this._nullOrUndef(options.controls)) options.controls = {};
@@ -744,7 +734,6 @@ class AnboxStream {
 
   _validateOptions(options) {
     this._validateApiVersion(options.apiVersion);
-    this._validateApiVersion(options.fallbackApiVersion);
 
     if (this._nullOrUndef(options.targetElement)) {
       throw newError(
@@ -2149,7 +2138,6 @@ class AnboxWebRTCManager {
    * Requires a Session object and returns a video + audio element.
    * @param options {Object} configuration of the WebRTC stream
    * @param [options.apiVersion=2] {integer} API version
-   * @param [options.fallbackApiVersion=1] {integer} API version to fallback to if specified one is not supported.
    * @param [options.enableSpeakers=true] {boolean} Enable speakers
    * @param [options.enableMic=false] {boolean} Enable microphone
    * @param [options.enableCamera=false] {boolean} Enable camera
@@ -2177,9 +2165,6 @@ class AnboxWebRTCManager {
 
     // Timer used to give the SDK a chance to reconnect if something goes wrong temporarily
     this._disconnectedTimeout = null;
-
-    // Timer used to wait for the discover response
-    this._discoverTimeout = null;
 
     this._videoStream = null;
     this._audioStream = null;
@@ -2286,7 +2271,6 @@ class AnboxWebRTCManager {
     };
 
     this._debugEnabled = options.debug;
-    this._fallbackApiVersion = options.fallbackApiVersion;
     this._apiVersionInUse = options.apiVersion;
 
     this._onError = () => {};
@@ -2733,29 +2717,12 @@ class AnboxWebRTCManager {
 
     this._createDataChannels();
 
-    if (this._apiVersionInUse < 2) {
-      this._sendSettings();
-    } else {
-      // We send a discover message first to find out what maximum API
-      // version is supported by the server. If we don't hear back in
-      // time we will use the fallback API version instead to proceed
-      var discoverMsg = {
-        type: "discover",
-      };
-      this._ws.send(JSON.stringify(discoverMsg));
-
-      this._discoverTimeout = window.setTimeout(() => {
-        // We timed out waiting for the discover message so we now start to
-        // send the settings and proceed with our fallback protocol version
-        this._discoverTimeout = null;
-        this._useApiFallback();
-      }, 500);
-    }
-  }
-
-  _useApiFallback() {
-    this._apiVersionInUse = this._fallbackApiVersion;
-    this._sendSettings();
+    // We send a discover message first to find out what maximum API
+    // version is supported by the server.
+    var discoverMsg = {
+      type: "discover",
+    };
+    this._ws.send(JSON.stringify(discoverMsg));
   }
 
   _sendSettings() {
@@ -2873,36 +2840,19 @@ class AnboxWebRTCManager {
       });
   }
 
-  _stopDiscoverTimeout() {
-    window.clearTimeout(this._discoverTimeout);
-    this._discoverTimeout = null;
-  }
-
   _onWsMessage(event) {
     const msg = JSON.parse(event.data);
 
     switch (msg.type) {
       case "resp:discover":
-        // Do not send the settings or creates an offer again
-        // if the discoverTimeout is destroyed(meaning the client
-        // has used the fallback API for signaling).
-        // This ensures the number and order of m-lines in the
-        // offer and the answer are identical.
-        if (this._discoverTimeout === null) return;
-
-        this._stopDiscoverTimeout();
-
         this._discoverMsgReceived(msg);
 
         if (this._apiVersionInUse > msg.max_api_version) {
-          if (this._fallbackApiVersion > msg.max_api_version) {
-            this._onError(
-              "API version not supported by server",
-              ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
-            );
-            return;
-          }
-          this._apiVersionInUse = this._fallbackApiVersion;
+          this._onError(
+            "API version not supported by server",
+            ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT
+          );
+          return;
         }
 
         this._sendSettings();
@@ -2945,19 +2895,6 @@ class AnboxWebRTCManager {
         break;
       }
       case "error": {
-        // In the case that we receive a bad request error while waiting for a
-        // discover request we can immediately use our fallback API version
-        // as older Anbox versions respond with that error for unknown signaling
-        // message types
-        if (
-          this._discoverTimeout !== null &&
-          msg.code == ANBOX_STREAM_SIGNALING_ERROR_BAD_REQUEST
-        ) {
-          this._stopDiscoverTimeout();
-          this._useApiFallback();
-          return;
-        }
-
         this._log("got RTC error");
         this._onError(msg.message, ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED);
         break;
