@@ -179,7 +179,10 @@ class AnboxStream {
     this._webrtcManager.onDiscoverMessageReceived((msg) => {
       if (this._streamCanvas) this._streamCanvas.setTargetFps(msg.fps);
       if (msg.capabilities?.includes?.("vhal")) {
-        this._vhalManager = new AnboxVhalManager(this._webrtcManager);
+        this._vhalManager = new AnboxVhalManager(
+          this._webrtcManager,
+          this._options.callbacks.vhalReady
+        );
         this._webrtcManager.onVhalPropConfigsReceived(
           this._vhalManager.onVhalPropConfigsReceived.bind(this._vhalManager)
         );
@@ -189,10 +192,10 @@ class AnboxStream {
         this._webrtcManager.onVhalSetAnswerReceived(
           this._vhalManager.onVhalSetAnswerReceived.bind(this._vhalManager)
         );
-        this._options.callbacks.vhalReady();
       }
     });
     this._webrtcManager.onControlChannelOpen(() => {
+      this._webrtcManager._isControlChannelOpen = true;
       if (this._nullOrUndef(this._vhalManager)) return;
       // Request all vhal prop configs from the server to populate the vhal
       // manager cache
@@ -554,7 +557,9 @@ class AnboxStream {
    * Returns true if VHAL is supported and available, false otherwise.
    */
   isVhalAvailable() {
-    return !this._nullOrUndef(this._vhalManager);
+    return (
+      !this._nullOrUndef(this._vhalManager) && this._vhalManager.hasConfigs()
+    );
   }
 
   _hasWebGLSupported() {
@@ -2159,6 +2164,7 @@ class AnboxWebRTCManager {
     this._stunServers = [];
     this._pendingCandidates = [];
     this._appliedRemoteDescription = false;
+    this._isControlChannelOpen = false;
 
     // Timer global to the whole signaling process
     this._signalingTimeout = null;
@@ -4041,14 +4047,20 @@ class AnboxVhalManager {
   /**
    * Constructor to initialize a new instance of the AnboxVhalManager which is
    * responsible to communicate with an Android VHAL.
-   * @param webrtcManager {object} Anbox WebRTCManager object
+   * @param webrtcManager {object} Anbox WebRTCManager object.
+   * @param vhalReady {function} Callback to notify subscribers that VHAL is ready.
    * @param [timeout=1000] {number} How long to wait for an answer for the VHAL calls (in milliseconds).
    */
-  constructor(webrtcManager, timeout = 1000) {
+  constructor(webrtcManager, vhalReady = () => {}, timeout = 1000) {
     this._webrtcManager = webrtcManager;
+    this._vhalReady = vhalReady;
     this._timeout = timeout;
     this._waitingRequestsGet = [];
     this._waitingRequestsSet = [];
+
+    if (this._webrtcManager._isControlChannelOpen) {
+      this._webrtcManager.sendControlMessage("vhal::get-all-prop-configs");
+    }
   }
 
   /**
@@ -4173,9 +4185,12 @@ class AnboxVhalManager {
   }
 
   onVhalPropConfigsReceived(propConfigs) {
+    const firstReceipt =
+      this._nullOrUndef(this._configStore) || this._configStore.size === 0;
     this._configStore = new Map(
       propConfigs.map((config) => [config.prop, config])
     );
+    if (firstReceipt && this._configStore.size > 0) this._vhalReady();
   }
 
   onVhalGetAnswerReceived(getAnswer) {
@@ -4184,6 +4199,10 @@ class AnboxVhalManager {
 
   onVhalSetAnswerReceived(setAnswer) {
     this._waitingRequestsSet.shift()?.resolve(setAnswer);
+  }
+
+  hasConfigs() {
+    return !this._nullOrUndef(this._configStore) && this._configStore.size > 0;
   }
 }
 
