@@ -44,5 +44,5 @@ jobs:
           git config --global user.name "GitHub Actions"
           git add .base_version
           git commit -m "feat(base_version): bump up base version to $(cat .base_version)"
-          git push origin master
+          git push origin main
         fi
