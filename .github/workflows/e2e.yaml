@@ -82,6 +82,7 @@ jobs:
       shell: bash
       run: |
         set -x
+        echo "CI=true" >> .env.local
         echo "ARCHITECTURE=amd64" >> .env.local
         echo "AMS_API_CERTIFICATE=anbox-cloud.crt" >> .env.local
         echo "AMS_API_CERTIFICATE_KEY=anbox-cloud.key" >> .env.local

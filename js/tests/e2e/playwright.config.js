@@ -18,11 +18,13 @@
 
 import { defineConfig, devices } from "@playwright/test";
 import { BASE_URL } from "./fixtures/constants.cjs";
+require("dotenv").config({ path: ".env.local" });
 
 export default defineConfig({
   globalSetup: require.resolve("./global-setup"),
   globalTeardown: require.resolve("./global-teardown"),
   testDir: "./tests",
+  reporter: process.env.CI ? "html" : "line",
   /* Maximum time one test can run for. */
   timeout: 60_000,
   expect: {

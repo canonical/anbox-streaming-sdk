@@ -18,6 +18,7 @@
 
 import { chromium, expect } from "@playwright/test";
 import { APP_NAME, BASE_URL } from "./fixtures/constants.cjs";
+require("dotenv").config({ path: ".env.local" });
 
 const isTestAppAvailable = async () => {
   const response = await fetch(`${BASE_URL}/asgApplications`);

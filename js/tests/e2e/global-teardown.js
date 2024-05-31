@@ -18,6 +18,7 @@
 
 import { expect } from "@playwright/test";
 import { BASE_URL } from "./fixtures/constants.cjs";
+require("dotenv").config({ path: ".env.local" });
 
 const deleteTestSession = async () => {
   const deleteSessionResponse = await fetch(`${BASE_URL}/session`, {
