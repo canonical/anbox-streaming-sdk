@@ -82,6 +82,7 @@ jobs:
       shell: bash
       run: |
         set -x
+        echo "ARCHITECTURE=amd64" >> .env.local
         echo "AMS_API_CERTIFICATE=anbox-cloud.crt" >> .env.local
         echo "AMS_API_CERTIFICATE_KEY=anbox-cloud.key" >> .env.local
         echo "AMS_API_URL=$(sudo cat /var/snap/microbox/common/dashboard/config.yaml | grep AMS_API_URL | cut -d ' ' -f2)" >> .env.local

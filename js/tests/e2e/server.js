@@ -113,7 +113,7 @@ const streamToBuffer = (stream) => {
 app.post("/application", (_req, res) => {
   const manifestJson = {
     name: APP_NAME,
-    image: IMAGE_NAME,
+    image: `${IMAGE_NAME}:${process.env.ARCHITECTURE}`,
     watchdog: {
       disabled: false,
     },

@@ -17,7 +17,7 @@
  */
 
 const APP_NAME = "streaming-sdk-e2e-tests";
-const IMAGE_NAME = "jammy:android13:amd64";
+const IMAGE_NAME = "jammy:android13";
 const SERVER_PORT = 2999;
 const BASE_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
