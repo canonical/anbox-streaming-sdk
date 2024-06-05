@@ -1,0 +1,103 @@
+name: E2e tests
+
+on:
+  workflow_call:
+    secrets:
+      UBUNTU_PRO_TOKEN:
+        required: true
+  workflow_dispatch:
+  schedule:
+    # execute the action nightly
+    - cron: '0 10 * * *'
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+defaults:
+  run:
+    working-directory: js/tests/e2e
+
+jobs:
+  e2e:
+    name: microbox, amd64
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@main
+
+    - name: Store current date and time in output
+      id: datetime
+      run: echo "datetime=$(date -u +'%Y-%m-%dT%H.%M.%SZ')" >> $GITHUB_OUTPUT
+
+    - name: Generate keys
+      run: |
+        set -x
+        openssl req -x509 -newkey rsa:4096 -keyout anbox-cloud.key -out anbox-cloud.crt -days 365 -nodes -subj "/C=GB/ST=London/L=London/O=Global Security/OU=IT Department/CN=example.com"
+
+    - name: Install LXD
+      uses: canonical/setup-lxd@v0.1.1
+      with:
+        channel: 5.0/stable
+
+    - name: Configure LXD
+      shell: bash
+      run: |
+        set -x
+        sudo lxc config set core.https_address "[::]:8443"
+        sudo lxc config set cluster.https_address "127.0.0.1:8443"
+        sudo lxc cluster enable local
+        sudo lxc storage create local zfs
+
+    - name: Install microbox
+      run: |
+        set -x
+        sudo pro attach ${{ secrets.UBUNTU_PRO_TOKEN }}
+        sudo pro enable --access-only anbox-cloud
+        sudo apt update
+        sudo apt install -y anbox-modules-dkms-122 linux-modules-extra-$(uname -r)
+        for n in binder_linux anbox_sync virt_wifi ; do sudo modprobe "$n" ; done
+        sudo snap install --edge microbox
+        sudo microbox init --auto
+
+    - name: Configure AMC
+      run: |
+        set -x
+        sudo cp anbox-cloud.crt /root/client.crt
+        sudo microbox.amc config trust add /root/client.crt
+        sudo microbox.amc config set container.security_updates false
+        sudo microbox.amc config set registry.mode manual
+        sudo microbox.amc config set images.version_lockstep false
+        sudo microbox.amc config set images.url https://images.anbox-cloud.io/stable/
+        # NOTE We need to hide the token here to not accidentially leak credentials
+        set +x
+        sudo microbox.amc config set images.auth "bearer:$(sudo cat /var/lib/ubuntu-advantage/private/machine-token.json | jq -r '.resourceTokens[] | select(.type=="anbox-images").token')"
+        set -x
+        sudo microbox.amc image add jammy:android13:amd64 jammy:android13:amd64
+
+    - name: Configure env variables
+      shell: bash
+      run: |
+        set -x
+        echo "CI=true" >> .env.local
+        echo "ARCHITECTURE=amd64" >> .env.local
+        echo "AMS_API_CERTIFICATE=anbox-cloud.crt" >> .env.local
+        echo "AMS_API_CERTIFICATE_KEY=anbox-cloud.key" >> .env.local
+        echo "AMS_API_URL=$(sudo cat /var/snap/microbox/common/dashboard/config.yaml | grep AMS_API_URL | cut -d ' ' -f2)" >> .env.local
+        echo "ASG_API_URL=$(sudo cat /var/snap/microbox/common/dashboard/config.yaml | grep ASG_API_URL | cut -d ' ' -f2)" >> .env.local
+        # NOTE We need to hide the token here to not accidentially leak credentials
+        set +x
+        echo "ASG_API_TOKEN=$(sudo cat /var/snap/microbox/common/dashboard/config.yaml | grep ASG_API_TOKEN | cut -d ' ' -f2)" >> .env.local
+        set -x
+
+    - name: Run tests
+      run: |
+        ./run-tests.sh
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report-${{ steps.datetime.outputs.datetime }}
+        path: js/tests/e2e/playwright-report/
+        retention-days: 30
