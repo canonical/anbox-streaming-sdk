@@ -8,7 +8,7 @@ on:
   push:
     branches:
       - '**'
-  pull_request:
+  pull_request_target:
     branches:
       - '**'
 
@@ -43,3 +43,7 @@ jobs:
         name: anbox-streaming-sdk_${{ steps.get-version.outputs.version }}
         if-no-files-found: error
         path: results/
+  e2e:
+    uses: ./.github/workflows/e2e.yaml
+    secrets:
+      UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}

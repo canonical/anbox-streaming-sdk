@@ -5,16 +5,6 @@ on:
     secrets:
       UBUNTU_PRO_TOKEN:
         required: true
-  workflow_dispatch:
-  schedule:
-    # execute the action nightly
-    - cron: '0 10 * * *'
-  push:
-    branches:
-      - '**'
-  pull_request:
-    branches:
-      - '**'
 
 defaults:
   run:
