@@ -99,7 +99,7 @@ class AnboxStream {
    * @param [options.foregroundActivity] {string} Activity to be displayed in the foreground. NOTE: it only works with an application that has APK provided on its creation.
    * @param [options.callbacks] {object} A list of callbacks to react on stream lifecycle events.
    * @param [options.callbacks.ready=none] {function} Called when the video and audio stream are ready to be inserted in the DOM.
-   * @param [options.callbacks.error=none] {function} Called on stream error with the message as parameter.
+   * @param [options.callbacks.error=none] {function} Called on stream error with the error object as a parameter.
    * @param [options.callbacks.done=none] {function} Called when the stream is closed.
    * @param [options.callbacks.messageReceived=none] {function} Called when a message is received from Anbox.
    * @param [options.callbacks.statsUpdated=none] {function} Called when the overall webrtc peer connection statistics are updated.
