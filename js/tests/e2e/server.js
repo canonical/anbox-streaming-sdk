@@ -101,15 +101,6 @@ app.delete("/application", function (_req, res) {
     });
 });
 
-const streamToBuffer = (stream) => {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    stream.on("data", (chunk) => chunks.push(chunk));
-    stream.on("end", () => resolve(Buffer.concat(chunks)));
-    stream.on("error", (err) => reject(err));
-  });
-};
-
 app.post("/application", (_req, res) => {
   const manifestJson = {
     name: APP_NAME,
@@ -126,21 +117,15 @@ app.post("/application", (_req, res) => {
   const manifestBuffer = Buffer.from(yaml.stringify(manifestJson));
   const zipStream = new compressing.zip.Stream();
   zipStream.addEntry(manifestBuffer, { relativePath: "manifest.yaml" });
-  streamToBuffer(zipStream)
-    .then((zipBuffer) => {
-      axios
-        .post(`${process.env.AMS_API_URL}/1.0/applications`, zipBuffer, {
-          headers: {
-            "Content-Type": "application/octet-stream",
-          },
-          httpsAgent: amsAgent,
-        })
-        .then((response) => {
-          res.send(response.data);
-        })
-        .catch((error) => {
-          res.status(500).send(error);
-        });
+  axios
+    .post(`${process.env.AMS_API_URL}/1.0/applications`, zipStream, {
+      headers: {
+        "Content-Type": "application/octet-stream",
+      },
+      httpsAgent: amsAgent,
+    })
+    .then((response) => {
+      res.send(response.data);
     })
     .catch((error) => {
       res.status(500).send(error);
