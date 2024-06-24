@@ -9,10 +9,7 @@ on:
   schedule:
     # execute the action nightly
     - cron: '0 10 * * *'
-  push:
-    branches:
-      - '**'
-  pull_request:
+  pull_request_target:
     branches:
       - '**'
 
@@ -22,10 +19,17 @@ defaults:
 
 jobs:
   e2e:
+    environment: ci-end-to-end
     name: microbox, amd64
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@main
+    - uses: actions/checkout@v4
+      with:
+        # Fetch all history for all branches and tags
+        fetch-depth: 0
+
+    - name: Check out the source branch
+      run: git checkout ${{ github.event.pull_request.head.ref }}
 
     - name: Store current date and time in output
       id: datetime
