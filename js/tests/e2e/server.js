@@ -27,6 +27,7 @@ require("dotenv").config({ path: ".env.local" });
 
 const {
   APP_NAME,
+  DEFAULT_ARCH,
   IMAGE_NAME,
   SERVER_PORT,
 } = require("./fixtures/constants.cjs");
@@ -47,6 +48,25 @@ const asgAgent = new https.Agent({
 const asgHeaders = {
   Authorization: `macaroon root=${process.env.ASG_API_TOKEN}`,
   "Content-Type": "application/json",
+};
+
+const getArch = async () => {
+  const response = await axios.get(`${process.env.AMS_API_URL}/1.0/nodes`, {
+    httpsAgent: amsAgent,
+  });
+  const nodes = response.data.metadata;
+  if (nodes.length === 0) throw new Error("No nodes found");
+  const arch = nodes[0].architecture;
+  switch (arch) {
+    case "x86_64":
+    case "amd64":
+      return "amd64";
+    case "arm64":
+    case "aarch64":
+      return "arm64";
+    default:
+      return DEFAULT_ARCH;
+  }
 };
 
 app.get("/", function (_req, res) {
@@ -101,10 +121,10 @@ app.delete("/application", function (_req, res) {
     });
 });
 
-app.post("/application", (_req, res) => {
+app.post("/application", async (_req, res) => {
   const manifestJson = {
     name: APP_NAME,
-    image: `${IMAGE_NAME}:${process.env.ARCHITECTURE}`,
+    image: `${IMAGE_NAME}:${await getArch()}`,
     watchdog: {
       disabled: false,
     },

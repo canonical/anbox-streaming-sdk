@@ -24,7 +24,6 @@ export default defineConfig({
   globalSetup: require.resolve("./global-setup"),
   globalTeardown: require.resolve("./global-teardown"),
   testDir: "./tests",
-  reporter: process.env.CI ? "html" : "line",
   /* Maximum time one test can run for. */
   timeout: 60_000,
   expect: {
@@ -43,7 +42,7 @@ export default defineConfig({
   /* Opt out of parallel tests on CI. */
   workers: 1,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: "html",
+  reporter: process.env.CI ? "html" : "line",
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     baseURL: BASE_URL,
