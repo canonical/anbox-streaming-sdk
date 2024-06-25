@@ -48,7 +48,7 @@ jobs:
         ./scripts/run-tests.sh
 
     - name: Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: anbox-streaming-sdk_${{ steps.get-version.outputs.version }}.zip
         tag_name: ${{ steps.get-version.outputs.version }}
