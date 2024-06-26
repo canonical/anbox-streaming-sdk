@@ -20,6 +20,6 @@ import { test } from "@playwright/test";
 import { joinSession, disconnectStream } from "./shared";
 
 test("join session and disconnect stream", async ({ page }) => {
-  await joinSession(page);
+  await joinSession(page, process.env.AOSP_SESSION_ID);
   await disconnectStream(page);
 });

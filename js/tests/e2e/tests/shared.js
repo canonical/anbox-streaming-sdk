@@ -18,8 +18,8 @@
 
 import { expect } from "@playwright/test";
 
-export const joinSession = async (page) => {
-  await page.goto(`/?sessionId=${process.env.SESSION_ID}`);
+export const joinSession = async (page, sessionId) => {
+  await page.goto(`/?sessionId=${sessionId}`);
 
   await expect(page.locator("#anbox-stream").locator("video")).toHaveCount(1);
   await expect(page.locator("#anbox-stream").locator("audio")).toHaveCount(1);

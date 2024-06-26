@@ -32,7 +32,7 @@ const TARGET_VHAL_PROPS = Object.keys(VALUES).map((id) => +id);
 test("read VHAL prop configs, get VHAL prop values, set VHAL prop values", async ({
   page,
 }) => {
-  await joinSession(page);
+  await joinSession(page, process.env.AAOS_SESSION_ID);
 
   await page.waitForFunction(
     () =>
