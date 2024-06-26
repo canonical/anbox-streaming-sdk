@@ -29,33 +29,75 @@ const VALUES = {
 
 const TARGET_VHAL_PROPS = Object.keys(VALUES).map((id) => +id);
 
-test("read VHAL prop configs, get VHAL prop values, set VHAL prop values", async ({
-  page,
-}) => {
-  await joinSession(page, process.env.AAOS_SESSION_ID);
+const waitForVhalReady = async (page) => {
+  await page.waitForFunction(() => globalThis.vhalReady !== undefined, null, {
+    timeout: 20_000,
+  });
+};
 
-  await page.waitForFunction(
-    () =>
-      globalThis.vhalPropConfigs !== undefined &&
-      globalThis.vhalPropConfigs.length > 0,
-    null,
-    {
-      timeout: 20_000,
-    },
+const checkVhalAvailable = async (page, expectedResult) => {
+  const isVhalAvailable = await page.evaluate(() =>
+    globalThis.stream.isVhalAvailable(),
   );
+  expect(isVhalAvailable).toBe(expectedResult);
+};
 
-  const vhalProperties = await page.evaluate(async (TARGET_VHAL_PROPS) => {
-    const filteredPropConfigs = globalThis.vhalPropConfigs.filter((prop) =>
-      TARGET_VHAL_PROPS.includes(prop.prop),
-    );
-    const vhalProps =
-      await globalThis.stream.getVhalProperties(filteredPropConfigs);
-    return vhalProps;
-  }, TARGET_VHAL_PROPS);
+const getAllVhalPropConfigs = async (page) => {
+  const allVhalPropConfigs = await page.evaluate(() =>
+    globalThis.stream.getAllVhalPropConfigs(),
+  );
+  return allVhalPropConfigs;
+};
 
-  expect(vhalProperties.length).toBe(TARGET_VHAL_PROPS.length);
-  expect(vhalProperties.some((getResult) => getResult.error)).toBe(false);
+const getVhalProperties = async (page, vhalPropConfigs) => {
+  const vhalProperties = await page.evaluate(
+    async ([vhalPropConfigs, TARGET_VHAL_PROPS]) => {
+      const filteredPropConfigs = vhalPropConfigs.filter((prop) =>
+        TARGET_VHAL_PROPS.includes(prop.prop),
+      );
+      const vhalProps =
+        await globalThis.stream.getVhalProperties(filteredPropConfigs);
+      return vhalProps;
+    },
+    [vhalPropConfigs, TARGET_VHAL_PROPS],
+  );
+  return vhalProperties;
+};
 
+const setVhalProperties = async (page, setInputs) => {
+  const setResults = await page.evaluate(async (setInputs) => {
+    const res = await globalThis.stream.setVhalProperties(setInputs);
+    return res;
+  }, setInputs);
+  return setResults;
+};
+
+const getValueObject = (prop) => {
+  if (Object.hasOwn(prop, "int32_values")) {
+    return {
+      [prop.prop]: prop.int32_values,
+    };
+  } else if (Object.hasOwn(prop, "float_values")) {
+    return {
+      [prop.prop]: prop.float_values,
+    };
+  } else if (Object.hasOwn(prop, "string_value")) {
+    return {
+      [prop.prop]: prop.string_value,
+    };
+  } else {
+    return null;
+  }
+};
+
+const checkLengthErrors = (getOrSetArray) => {
+  expect(getOrSetArray.length).toBe(TARGET_VHAL_PROPS.length);
+  expect(getOrSetArray.some((getOrSetResult) => getOrSetResult.error)).toBe(
+    false,
+  );
+};
+
+const getSetInputs = (vhalProperties) => {
   const getSetInput = (propId, targetType, isArray = false) => {
     const isStringValue = targetType === "string_value";
     const value = vhalProperties.find((prop) => prop.prop === propId);
@@ -83,13 +125,62 @@ test("read VHAL prop configs, get VHAL prop values, set VHAL prop values", async
   setInputs.push(getSetInput(291504900, "float_values")); // ENGINE_OIL_TEMP
   setInputs.push(getSetInput(286261505, "string_value")); // INFO_MAKE
 
-  const setProperties = await page.evaluate(async (setInputs) => {
-    const res = await globalThis.stream.setVhalProperties(setInputs);
-    return res;
-  }, setInputs);
+  return setInputs;
+};
 
-  expect(setProperties.length).toBe(TARGET_VHAL_PROPS.length);
-  expect(setProperties.some((setResult) => setResult.error)).toBe(false);
+const checkChanges = (getValues, setInputs, getValuesAfterSet) => {
+  expect(JSON.stringify(getValuesAfterSet)).not.toEqual(
+    JSON.stringify(getValues),
+  );
+  expect(JSON.stringify(setInputs[0].int32_values)).toEqual(
+    JSON.stringify(getValuesAfterSet["287310858"]),
+  ); // ABS_ACTIVE
+  expect(JSON.stringify(setInputs[1].int32_values)).toEqual(
+    JSON.stringify(getValuesAfterSet["289475073"]),
+  ); // AP_POWER_STATE_REPORT
+  expect(JSON.stringify(setInputs[2].int32_values)).toEqual(
+    JSON.stringify(getValuesAfterSet["289409539"]),
+  ); // DISPLAY_BRIGHTNESS
+  expect(JSON.stringify(setInputs[3].float_values)).toEqual(
+    JSON.stringify(getValuesAfterSet["291504900"]),
+  ); // ENGINE_OIL_TEMP
+  expect(setInputs[4].string_value).toEqual(getValuesAfterSet["286261505"]); // INFO_MAKE
+};
+
+test("VHAL methods on an AAOS session", async ({ page }) => {
+  await joinSession(page, process.env.AAOS_SESSION_ID);
+
+  await waitForVhalReady(page);
+  await checkVhalAvailable(page, true);
+  const allVhalPropConfigs = await getAllVhalPropConfigs(page);
+
+  const vhalPropsBefore = await getVhalProperties(page, allVhalPropConfigs);
+  checkLengthErrors(vhalPropsBefore);
+
+  const setInputs = getSetInputs(vhalPropsBefore);
+  const setResults = await setVhalProperties(page, setInputs);
+  checkLengthErrors(setResults);
+
+  const vhalPropsAfter = await getVhalProperties(page, allVhalPropConfigs);
+  checkLengthErrors(vhalPropsAfter);
+
+  const valuesBefore = Object.assign(
+    {},
+    ...vhalPropsBefore.map(getValueObject),
+  );
+  const valuesAfter = Object.assign({}, ...vhalPropsAfter.map(getValueObject));
+  checkChanges(valuesBefore, setInputs, valuesAfter);
+
+  await disconnectStream(page);
+});
+
+test("VHAL methods on an AOSP session", async ({ page }) => {
+  await joinSession(page, process.env.AOSP_SESSION_ID);
+
+  await checkVhalAvailable(page, false);
+  await expect(getAllVhalPropConfigs(page)).rejects.toThrow();
+  await expect(getVhalProperties(page, [])).rejects.toThrow();
+  await expect(setVhalProperties(page, [])).rejects.toThrow();
 
   await disconnectStream(page);
 });

@@ -58,7 +58,7 @@
 
         disconnect() {}
       }
-      var stream, isReady, isClosed, vhalPropConfigs;
+      var stream, isReady, isClosed, vhalReady;
       window.onload = () => {
         if (sessionId === null) {
           alert("sessionId is missing in the URL");
@@ -78,7 +78,7 @@
               isReady = true;
             },
             vhalReady: () => {
-              vhalPropConfigs = stream.getAllVhalPropConfigs();
+              vhalReady = true;
             },
             done: () => {
               isClosed = true;
