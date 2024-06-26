@@ -74,7 +74,7 @@ jobs:
         set +x
         sudo microbox.amc config set images.auth "bearer:$(sudo cat /var/lib/ubuntu-advantage/private/machine-token.json | jq -r '.resourceTokens[] | select(.type=="anbox-images").token')"
         set -x
-        sudo microbox.amc image add jammy:android13:amd64 jammy:android13:amd64
+        sudo microbox.amc image add jammy:aaos13:amd64 jammy:aaos13:amd64
 
     - name: Configure env variables
       shell: bash
