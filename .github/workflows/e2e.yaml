@@ -25,11 +25,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        # Fetch all history for all branches and tags
-        fetch-depth: 0
-
-    - name: Check out the source branch
-      run: git checkout ${{ github.event.pull_request.head.ref }}
+        ref: "${{ github.event.pull_request.merge_commit_sha }}"
 
     - name: Store current date and time in output
       id: datetime
