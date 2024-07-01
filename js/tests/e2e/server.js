@@ -25,7 +25,11 @@ const yaml = require("yaml");
 const compressing = require("compressing");
 require("dotenv").config({ path: ".env.local" });
 
-const { DEFAULT_ARCH, SERVER_PORT } = require("./fixtures/constants.cjs");
+const {
+  DEFAULT_ARCH,
+  SERVER_PORT,
+  SHARED_BROWSER_OPTIONS,
+} = require("./fixtures/constants.cjs");
 
 const app = express();
 app.listen(SERVER_PORT);
@@ -217,8 +221,10 @@ app.post("/session", (req, res) => {
     app,
     joinable: true,
     screen: {
-      width: 1280,
-      height: 720,
+      // we flip width and height of the session to have a smaller element
+      // (useful to reduce the screenshot size for the visual tests)
+      width: SHARED_BROWSER_OPTIONS.viewport.height,
+      height: SHARED_BROWSER_OPTIONS.viewport.width,
       fps: 60,
       density: 240,
     },

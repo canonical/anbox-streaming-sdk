@@ -22,8 +22,14 @@ const DEFAULT_ARCH = "amd64";
 const SERVER_PORT = 2999;
 const BASE_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
+const SHARED_BROWSER_OPTIONS = {
+  hasTouch: true,
+  viewport: { width: 1280, height: 720 },
+};
+
 exports.AOSP_APP_NAME = AOSP_APP_NAME;
 exports.AAOS_APP_NAME = AAOS_APP_NAME;
 exports.DEFAULT_ARCH = DEFAULT_ARCH;
 exports.SERVER_PORT = SERVER_PORT;
 exports.BASE_URL = BASE_URL;
+exports.SHARED_BROWSER_OPTIONS = SHARED_BROWSER_OPTIONS;

@@ -17,13 +17,15 @@
  */
 
 import { defineConfig, devices } from "@playwright/test";
-import { BASE_URL } from "./fixtures/constants.cjs";
+import { BASE_URL, SHARED_BROWSER_OPTIONS } from "./fixtures/constants.cjs";
 require("dotenv").config({ path: ".env.local" });
 
 export default defineConfig({
   globalSetup: require.resolve("./global-setup"),
   globalTeardown: require.resolve("./global-teardown"),
   testDir: "./tests",
+  snapshotPathTemplate:
+    "{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{ext}",
   /* Maximum time one test can run for. */
   timeout: 60_000,
   expect: {
@@ -60,6 +62,7 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
+        ...SHARED_BROWSER_OPTIONS,
       },
     },
 
@@ -67,6 +70,14 @@ export default defineConfig({
       name: "firefox",
       use: {
         ...devices["Desktop Firefox"],
+        ...SHARED_BROWSER_OPTIONS,
+        // on Firefox, the picture-in-picture video toggle overlaps the video
+        // element, so we need to disable it to avoid it getting in the way
+        launchOptions: {
+          firefoxUserPrefs: {
+            "media.videocontrols.picture-in-picture.video-toggle.enabled": false,
+          },
+        },
       },
     },
   ],
