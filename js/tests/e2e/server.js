@@ -217,8 +217,8 @@ app.post("/session", (req, res) => {
     app,
     joinable: true,
     screen: {
-      width: 1280,
-      height: 720,
+      width: 720,
+      height: 1280,
       fps: 60,
       density: 240,
     },
