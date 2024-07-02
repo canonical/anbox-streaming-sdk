@@ -75,13 +75,13 @@ jobs:
         sudo microbox.amc config set images.auth "bearer:$(sudo cat /var/lib/ubuntu-advantage/private/machine-token.json | jq -r '.resourceTokens[] | select(.type=="anbox-images").token')"
         set -x
         sudo microbox.amc image add jammy:android13:amd64 jammy:android13:amd64
+        sudo microbox.amc image add jammy:aaos13:amd64 jammy:aaos13:amd64
 
     - name: Configure env variables
       shell: bash
       run: |
         set -x
         echo "CI=true" >> .env.local
-        echo "ARCHITECTURE=amd64" >> .env.local
         echo "AMS_API_CERTIFICATE=anbox-cloud.crt" >> .env.local
         echo "AMS_API_CERTIFICATE_KEY=anbox-cloud.key" >> .env.local
         echo "AMS_API_URL=$(sudo cat /var/snap/microbox/common/dashboard/config.yaml | grep AMS_API_URL | cut -d ' ' -f2)" >> .env.local

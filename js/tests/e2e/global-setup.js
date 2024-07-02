@@ -17,34 +17,42 @@
  */
 
 import { chromium, expect } from "@playwright/test";
-import { APP_NAME, BASE_URL } from "./fixtures/constants.cjs";
+import {
+  AOSP_APP_NAME,
+  AAOS_APP_NAME,
+  BASE_URL,
+} from "./fixtures/constants.cjs";
 require("dotenv").config({ path: ".env.local" });
 
-const isTestAppAvailable = async () => {
+const APP_RETRY_LIMIT = 300;
+const SESSION_RETRY_LIMIT = 50;
+const ANDROID_BOOT_DELAY = 20_000;
+
+const isTestAppAvailable = async (appName) => {
   const response = await fetch(`${BASE_URL}/asgApplications`);
   const applications = await response.json();
-  return applications.find((application) => application.name === APP_NAME);
+  return applications.find((application) => application.name === appName);
 };
 
-const hasTestSession = async () => {
+const hasTestSession = async (appName) => {
   const response = await fetch(`${BASE_URL}/sessions`);
   const sessions = await response.json();
-  return sessions.find((session) => session.app === APP_NAME);
+  return sessions.find((session) => session.app === appName);
 };
 
-const hasActiveTestSession = async () => {
+const hasActiveTestSession = async (appName) => {
   const response = await fetch(`${BASE_URL}/sessions`);
   const sessions = await response.json();
   const session = sessions.find(
-    (session) => session.app === APP_NAME && session.status === "active",
+    (session) => session.app === appName && session.status === "active",
   );
   return session ? session.id : false;
 };
 
-const waitForSessionActive = async (page) => {
+const waitForSessionActive = async (page, appName) => {
   let retryCount = 0;
-  while (retryCount < 20) {
-    const sessionId = await hasActiveTestSession();
+  while (retryCount < SESSION_RETRY_LIMIT) {
+    const sessionId = await hasActiveTestSession(appName);
     if (sessionId) return sessionId;
     await page.waitForTimeout(3_000);
     retryCount++;
@@ -52,9 +60,9 @@ const waitForSessionActive = async (page) => {
   return false;
 };
 
-const createTestSession = async () => {
+const createTestSession = async (appName) => {
   const createSessionResponse = await fetch(
-    `${BASE_URL}/session?app=${APP_NAME}`,
+    `${BASE_URL}/session?app=${appName}`,
     {
       method: "POST",
     },
@@ -62,38 +70,38 @@ const createTestSession = async () => {
   expect(createSessionResponse.status).toBe(200);
 };
 
-const hasTestApplication = async () => {
+const hasTestApplication = async (appName) => {
   const response = await fetch(`${BASE_URL}/applications`);
   const applications = await response.json();
-  return applications.some((application) => application.name === APP_NAME);
+  return applications.some((application) => application.name === appName);
 };
 
-const hasReadyTestApplication = async () => {
+const hasReadyTestApplication = async (appName) => {
   const response = await fetch(`${BASE_URL}/applications`);
   const applications = await response.json();
-  const app = applications.find((application) => application.name === APP_NAME);
+  const app = applications.find((application) => application.name === appName);
   if (app && app.status === "error") {
     throw new Error("Application creation failed");
   }
   return applications.some(
     (application) =>
-      application.name === APP_NAME && application.status === "ready",
+      application.name === appName && application.status === "ready",
   );
 };
 
-const waitForAppReady = async (page) => {
+const waitForAppReady = async (page, appName) => {
   let retryCount = 0;
   // 1) check that status becomes ready
   // we allow many retries as we need to give it time to download the image
-  while (retryCount < 200) {
-    const isReady = await hasReadyTestApplication();
+  while (retryCount < APP_RETRY_LIMIT) {
+    const isReady = await hasReadyTestApplication(appName);
     if (isReady) break;
     await page.waitForTimeout(3_000);
     retryCount++;
   }
   // 2) check that application is available on ASG
-  while (retryCount < 200) {
-    const isAvailable = await isTestAppAvailable();
+  while (retryCount < APP_RETRY_LIMIT) {
+    const isAvailable = await isTestAppAvailable(appName);
     if (isAvailable) return true;
     await page.waitForTimeout(3_000);
     retryCount++;
@@ -101,35 +109,48 @@ const waitForAppReady = async (page) => {
   return false;
 };
 
-const createTestApplication = async () => {
-  const createAppResponse = await fetch(`${BASE_URL}/application`, {
-    method: "POST",
-  });
+const createTestApplication = async (appName) => {
+  const createAppResponse = await fetch(
+    `${BASE_URL}/application?name=${appName}`,
+    {
+      method: "POST",
+    },
+  );
   expect(createAppResponse.status).toBe(200);
 };
 
-async function globalSetup() {
-  const hasApp = await hasTestApplication();
+const setupSessionFor = async (page, appName) => {
+  const hasApp = await hasTestApplication(appName);
   if (!hasApp) {
-    await createTestApplication();
+    await createTestApplication(appName);
   }
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  const isAppReady = await waitForAppReady(page);
+  const isAppReady = await waitForAppReady(page, appName);
   if (!isAppReady) {
     throw new Error("Application did not become ready");
   }
-  const hasSession = await hasTestSession();
+  const hasSession = await hasTestSession(appName);
   if (!hasSession) {
-    await createTestSession();
+    await createTestSession(appName);
   }
-  const sessionId = await waitForSessionActive(page);
+  const sessionId = await waitForSessionActive(page, appName);
   if (!sessionId) {
     throw new Error("Session did not become active");
   }
-  process.env.SESSION_ID = sessionId;
   // wait a few more seconds to let Android boot up
-  await page.waitForTimeout(10_000);
+  await page.waitForTimeout(ANDROID_BOOT_DELAY);
+  return sessionId;
+};
+
+async function globalSetup() {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  const sessionIds = await Promise.all(
+    [AOSP_APP_NAME, AAOS_APP_NAME].map((appName) => {
+      return setupSessionFor(page, appName);
+    }),
+  );
+  process.env.AOSP_SESSION_ID = sessionIds[0];
+  process.env.AAOS_SESSION_ID = sessionIds[1];
   await browser.close();
 }
 

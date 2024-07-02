@@ -17,26 +17,38 @@
  */
 
 import { expect } from "@playwright/test";
-import { BASE_URL } from "./fixtures/constants.cjs";
+import {
+  AOSP_APP_NAME,
+  AAOS_APP_NAME,
+  BASE_URL,
+} from "./fixtures/constants.cjs";
 require("dotenv").config({ path: ".env.local" });
 
-const deleteTestSession = async () => {
-  const deleteSessionResponse = await fetch(`${BASE_URL}/session`, {
-    method: "DELETE",
-  });
+const deleteTestSession = async (appName) => {
+  const deleteSessionResponse = await fetch(
+    `${BASE_URL}/session?name=${appName}`,
+    {
+      method: "DELETE",
+    },
+  );
   expect(deleteSessionResponse.status).toBe(200);
 };
 
-const deleteTestApplication = async () => {
-  const deleteAppResponse = await fetch(`${BASE_URL}/application`, {
-    method: "DELETE",
-  });
+const deleteTestApplication = async (appName) => {
+  const deleteAppResponse = await fetch(
+    `${BASE_URL}/application?name=${appName}`,
+    {
+      method: "DELETE",
+    },
+  );
   expect(deleteAppResponse.status).toBe(200);
 };
 
 async function globalTeardown() {
-  await deleteTestSession();
-  await deleteTestApplication();
+  await deleteTestSession(AOSP_APP_NAME);
+  await deleteTestApplication(AOSP_APP_NAME);
+  await deleteTestSession(AAOS_APP_NAME);
+  await deleteTestApplication(AAOS_APP_NAME);
 }
 
 export default globalTeardown;

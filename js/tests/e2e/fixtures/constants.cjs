@@ -16,12 +16,14 @@
  * limitations under the License.
  */
 
-const APP_NAME = "streaming-sdk-e2e-tests";
-const IMAGE_NAME = "jammy:android13";
+const AOSP_APP_NAME = "streaming-sdk-e2e-tests_AOSP";
+const AAOS_APP_NAME = "streaming-sdk-e2e-tests_AAOS";
+const DEFAULT_ARCH = "amd64";
 const SERVER_PORT = 2999;
 const BASE_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
-exports.APP_NAME = APP_NAME;
-exports.IMAGE_NAME = IMAGE_NAME;
+exports.AOSP_APP_NAME = AOSP_APP_NAME;
+exports.AAOS_APP_NAME = AAOS_APP_NAME;
+exports.DEFAULT_ARCH = DEFAULT_ARCH;
 exports.SERVER_PORT = SERVER_PORT;
 exports.BASE_URL = BASE_URL;

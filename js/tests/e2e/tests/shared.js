@@ -16,10 +16,21 @@
  * limitations under the License.
  */
 
-import { test } from "@playwright/test";
-import { joinSession, disconnectStream } from "./shared";
+import { expect } from "@playwright/test";
 
-test("join session and disconnect stream", async ({ page }) => {
-  await joinSession(page, process.env.AOSP_SESSION_ID);
-  await disconnectStream(page);
-});
+export const joinSession = async (page, sessionId) => {
+  await page.goto(`/?sessionId=${sessionId}`);
+
+  await expect(page.locator("#anbox-stream").locator("video")).toHaveCount(1);
+  await expect(page.locator("#anbox-stream").locator("audio")).toHaveCount(1);
+  await page.waitForFunction(() => globalThis.isReady !== undefined, null, {
+    timeout: 20_000,
+  });
+};
+
+export const disconnectStream = async (page) => {
+  await page.evaluate(() => globalThis.stream.disconnect());
+  await page.waitForFunction(() => globalThis.isClosed !== undefined, null, {
+    timeout: 20_000,
+  });
+};

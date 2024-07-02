@@ -25,11 +25,7 @@ const yaml = require("yaml");
 const compressing = require("compressing");
 require("dotenv").config({ path: ".env.local" });
 
-const {
-  APP_NAME,
-  IMAGE_NAME,
-  SERVER_PORT,
-} = require("./fixtures/constants.cjs");
+const { DEFAULT_ARCH, SERVER_PORT } = require("./fixtures/constants.cjs");
 
 const app = express();
 app.listen(SERVER_PORT);
@@ -47,6 +43,25 @@ const asgAgent = new https.Agent({
 const asgHeaders = {
   Authorization: `macaroon root=${process.env.ASG_API_TOKEN}`,
   "Content-Type": "application/json",
+};
+
+const getArch = async () => {
+  const response = await axios.get(`${process.env.AMS_API_URL}/1.0/nodes`, {
+    httpsAgent: amsAgent,
+  });
+  const nodes = response.data.metadata;
+  if (nodes.length === 0) throw new Error("No nodes found");
+  const arch = nodes[0].architecture;
+  switch (arch) {
+    case "x86_64":
+    case "amd64":
+      return "amd64";
+    case "arm64":
+    case "aarch64":
+      return "arm64";
+    default:
+      return DEFAULT_ARCH;
+  }
 };
 
 app.get("/", function (_req, res) {
@@ -70,7 +85,8 @@ app.get("/applications", function (_req, res) {
     });
 });
 
-app.delete("/application", function (_req, res) {
+app.delete("/application", function (req, res) {
+  const appName = req.query.name;
   axios
     .get(`${process.env.AMS_API_URL}/1.0/applications?recursion=1`, {
       httpsAgent: amsAgent,
@@ -78,7 +94,7 @@ app.delete("/application", function (_req, res) {
     .then((response) => {
       const applications = response.data.metadata;
       const id = applications.find(
-        (application) => application.name === APP_NAME,
+        (application) => application.name === appName,
       ).id;
       if (!id) {
         res.status(404).send("Application not found");
@@ -101,10 +117,14 @@ app.delete("/application", function (_req, res) {
     });
 });
 
-app.post("/application", (_req, res) => {
+app.post("/application", async (req, res) => {
+  const appName = req.query.name;
+  const imageName = appName.endsWith("AAOS")
+    ? "jammy:aaos13"
+    : "jammy:android13";
   const manifestJson = {
-    name: APP_NAME,
-    image: `${IMAGE_NAME}:${process.env.ARCHITECTURE}`,
+    name: appName,
+    image: `${imageName}:${await getArch()}`,
     watchdog: {
       disabled: false,
     },
@@ -160,7 +180,8 @@ app.get("/sessions", (_req, res) => {
     });
 });
 
-app.delete("/session", (_req, res) => {
+app.delete("/session", (req, res) => {
+  const appName = req.query.name;
   axios
     .get(`${process.env.ASG_API_URL}/1.0/sessions?recursion=1`, {
       headers: asgHeaders,
@@ -168,7 +189,7 @@ app.delete("/session", (_req, res) => {
     })
     .then((response) => {
       const sessions = response.data.metadata;
-      const id = sessions.find((session) => session.app === APP_NAME).id;
+      const id = sessions.find((session) => session.app === appName).id;
       if (!id) {
         res.status(404).send("Session not found");
       } else {
