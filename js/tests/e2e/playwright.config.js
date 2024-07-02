@@ -60,6 +60,7 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
+        hasTouch: true,
       },
     },
 
@@ -67,6 +68,12 @@ export default defineConfig({
       name: "firefox",
       use: {
         ...devices["Desktop Firefox"],
+        hasTouch: true,
+        launchOptions: {
+          firefoxUserPrefs: {
+            "media.videocontrols.picture-in-picture.video-toggle.enabled": false,
+          },
+        },
       },
     },
   ],
