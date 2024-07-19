@@ -20,7 +20,7 @@ defaults:
 jobs:
   e2e:
     environment: ci-end-to-end
-    name: microbox, amd64
+    name: appliance, amd64
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -50,7 +50,7 @@ jobs:
         sudo lxc cluster enable local
         sudo lxc storage create local zfs
 
-    - name: Install microbox
+    - name: Install Anbox Cloud Appliance
       run: |
         set -x
         sudo pro attach ${{ secrets.UBUNTU_PRO_TOKEN }}
@@ -58,24 +58,23 @@ jobs:
         sudo apt update
         sudo apt install -y anbox-modules-dkms-122 linux-modules-extra-$(uname -r)
         for n in binder_linux anbox_sync virt_wifi ; do sudo modprobe "$n" ; done
-        sudo snap install --edge microbox
-        sudo microbox init --auto
+        sudo snap install --channel=1.23/edge anbox-cloud-appliance
+        sudo anbox-cloud-appliance init --auto
 
     - name: Configure AMC
       run: |
         set -x
         sudo cp anbox-cloud.crt /root/client.crt
-        sudo microbox.amc config trust add /root/client.crt
-        sudo microbox.amc config set container.security_updates false
-        sudo microbox.amc config set registry.mode manual
-        sudo microbox.amc config set images.version_lockstep false
-        sudo microbox.amc config set images.url https://images.anbox-cloud.io/stable/
+        sudo anbox-cloud-appliance.amc config trust add /root/client.crt
+        sudo anbox-cloud-appliance.amc config set container.security_updates false
+        sudo anbox-cloud-appliance.amc config set images.version_lockstep false
+        sudo anbox-cloud-appliance.amc config set images.url https://images.anbox-cloud.io/stable/
         # NOTE We need to hide the token here to not accidentially leak credentials
         set +x
-        sudo microbox.amc config set images.auth "bearer:$(sudo cat /var/lib/ubuntu-advantage/private/machine-token.json | jq -r '.resourceTokens[] | select(.type=="anbox-images").token')"
+        sudo anbox-cloud-appliance.amc config set images.auth "bearer:$(sudo cat /var/lib/ubuntu-advantage/private/machine-token.json | jq -r '.resourceTokens[] | select(.type=="anbox-images").token')"
         set -x
-        sudo microbox.amc image add jammy:android13:amd64 jammy:android13:amd64
-        sudo microbox.amc image add jammy:aaos13:amd64 jammy:aaos13:amd64
+        sudo anbox-cloud-appliance.amc image add jammy:android13:amd64 jammy:android13:amd64
+        sudo anbox-cloud-appliance.amc image add jammy:aaos13:amd64 jammy:aaos13:amd64
 
     - name: Configure env variables
       shell: bash
@@ -84,11 +83,11 @@ jobs:
         echo "CI=true" >> .env.local
         echo "AMS_API_CERTIFICATE=anbox-cloud.crt" >> .env.local
         echo "AMS_API_CERTIFICATE_KEY=anbox-cloud.key" >> .env.local
-        echo "AMS_API_URL=$(sudo cat /var/snap/microbox/common/dashboard/config.yaml | grep AMS_API_URL | cut -d ' ' -f2)" >> .env.local
-        echo "ASG_API_URL=$(sudo cat /var/snap/microbox/common/dashboard/config.yaml | grep ASG_API_URL | cut -d ' ' -f2)" >> .env.local
+        echo "AMS_API_URL=$(sudo cat /var/snap/anbox-cloud-appliance/common/dashboard/config.yaml | grep AMS_API_URL | cut -d ' ' -f2)" >> .env.local
+        echo "ASG_API_URL=$(sudo cat /var/snap/anbox-cloud-appliance/common/dashboard/config.yaml | grep ASG_API_URL | cut -d ' ' -f2)" >> .env.local
         # NOTE We need to hide the token here to not accidentially leak credentials
         set +x
-        echo "ASG_API_TOKEN=$(sudo cat /var/snap/microbox/common/dashboard/config.yaml | grep ASG_API_TOKEN | cut -d ' ' -f2)" >> .env.local
+        echo "ASG_API_TOKEN=$(sudo cat /var/snap/anbox-cloud-appliance/common/dashboard/config.yaml | grep ASG_API_TOKEN | cut -d ' ' -f2)" >> .env.local
         set -x
 
     - name: Run tests
