@@ -2,15 +2,8 @@ name: CI
 
 on:
   workflow_dispatch:
-  schedule:
-    # execute the action nightly
-    - cron: '0 10 * * *'
   push:
-    branches:
-      - '**'
   pull_request:
-    branches:
-      - '**'
 
 jobs:
   build:

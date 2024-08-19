@@ -1,12 +1,10 @@
 name: E2e tests
 
 on:
-  workflow_call:
   workflow_dispatch:
-  schedule:
-    # execute the action nightly
-    - cron: '0 10 * * *'
   pull_request:
+  push:
+
 defaults:
   run:
     working-directory: js/tests/e2e
