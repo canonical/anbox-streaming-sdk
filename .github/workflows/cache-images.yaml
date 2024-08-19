@@ -1,0 +1,35 @@
+name: Cache Anbox images
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 10 * * *'
+
+jobs:
+  cache-images:
+    name: Cache Anbox images
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Download images
+      env:
+        IMAGE_SERVER_BUCKET: nightly
+      run: |
+        base_version="$(cat .base_version)"
+        channel="$base_version"/edge
+        image_server_url=https://"${{ secrets.IMAGE_SERVER_AUTH }}"@images.anbox-cloud.io/"$IMAGE_SERVER_BUCKET"/"$channel"
+        item_type=image
+
+        mkdir images
+        for product in android13 aaos13 ; do
+          image_name=jammy:"$product":amd64
+          image_path="$(curl -s "$image_server_url"/streams/v1/images.json | \
+            jq -r "last(.products.\"$image_name\".versions[] | select(.items.\"${item_type}\" != null)).items.\"${item_type}\".path")"
+          image_url="$image_server_url"/"$image_path"
+          curl -s "$image_url" -o images/"$product"_amd64.tar.xz
+        done
+    - name: Cache all images
+      uses: actions/cache/save@v4
+      with:
+        path: images
+        key: anbox-images-amd64
