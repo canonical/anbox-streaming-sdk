@@ -1,4 +1,4 @@
-name: E2e tests
+name: Run e2e tests
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ defaults:
 
 jobs:
   e2e:
-    name: appliance, amd64
+    name: Run e2e tests (appliance, amd64)
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -20,38 +20,19 @@ jobs:
       id: datetime
       run: echo "datetime=$(date -u +'%Y-%m-%dT%H.%M.%SZ')" >> $GITHUB_OUTPUT
 
-    - name: Install LXD
-      uses: canonical/setup-lxd@v0.1.1
+    - name: Determine test configuration
+      id: config
+      run: |
+        echo "base_version=$(cat ../../../.base_version)" >> "$GITHUB_OUTPUT"
+
+    - name: Setup Anbox Cloud
+      uses: canonical/anbox-cloud-github-action@main
       with:
-        channel: 5.0/stable
+        channel: ${{ steps.config.outputs.base_version }}/edge
 
-    - name: Configure LXD
-      shell: bash
+    - name: Tune installation
       run: |
-        set -x
-        sudo lxc config set core.https_address "[::]:8443"
-        sudo lxc config set cluster.https_address "127.0.0.1:8443"
-        sudo lxc cluster enable local
-        sudo lxc storage create local zfs
-
-    - name: Install Anbox Cloud Appliance
-      run: |
-        set -x
-        sudo apt update
-        sudo apt install -y linux-modules-extra-$(uname -r)
-        base_version="$(cat ../../../.base_version)"
-        sudo snap install --channel="$base_version"/edge anbox-cloud-appliance
-        sudo anbox-cloud-appliance init --auto
-
-        # FIXME Manually allow access for the current user on the CLI as --auto
-        # does not do this and --preseed is not working with 1.23.0
-        uid="$(id -u)"
-        sudo sed -i "s/allowed-uids.*/allowed-uids: [0, $uid]/g" \
-          /var/snap/anbox-cloud-appliance/common/ams/server/settings.yaml
-        sudo snap restart anbox-cloud-appliance.ams
-
         amc config set container.security_updates false
-
 
     - name: Restore cached images
       uses: actions/cache/restore@v4
@@ -62,38 +43,39 @@ jobs:
     - name: Import cached images
       run: |
         for name in android13 aaos13 ; do
-          amc image add jammy:"$name":amd64 ./images/"$name"_amd64.tar.xz
+          amc image add jammy:"$name":amd64 "$GITHUB_WORKSPACE"/images/"$name"_amd64.tar.xz
         done
 
     - name: Register trust certificate with AMS
       run: |
-        set -x
         openssl req -x509 -newkey rsa:4096 -keyout anbox-cloud.key \
           -out anbox-cloud.crt -days 365 -nodes \
           -subj "/C=GB/ST=London/L=London/O=Global Security/OU=IT Department/CN=example.com"
         amc config trust add ./anbox-cloud.crt
 
     - name: Configure env variables
-      shell: bash
       run: |
-        set -x
-        echo "CI=true" >> .env.local
+        echo "CI=true" > .env.local
         echo "AMS_API_CERTIFICATE=anbox-cloud.crt" >> .env.local
         echo "AMS_API_CERTIFICATE_KEY=anbox-cloud.key" >> .env.local
         echo "AMS_API_URL=$(sudo cat /var/snap/anbox-cloud-appliance/common/dashboard/config.yaml | grep AMS_API_URL | cut -d ' ' -f2)" >> .env.local
         echo "ASG_API_URL=$(sudo cat /var/snap/anbox-cloud-appliance/common/dashboard/config.yaml | grep ASG_API_URL | cut -d ' ' -f2)" >> .env.local
-        # NOTE We need to hide the token here to not accidentially leak credentials
-        set +x
         echo "ASG_API_TOKEN=$(sudo cat /var/snap/anbox-cloud-appliance/common/dashboard/config.yaml | grep ASG_API_TOKEN | cut -d ' ' -f2)" >> .env.local
-        set -x
 
     - name: Run tests
       run: |
         ./run-tests.sh
 
+    - name: Dump logs
+      if: failure()
+      run: |
+        sudo snap logs -n all anbox-cloud-appliance > appliance.log
+
     - uses: actions/upload-artifact@v4
       if: always()
       with:
         name: playwright-report-${{ steps.datetime.outputs.datetime }}
-        path: js/tests/e2e/playwright-report/
+        path: |
+          js/tests/e2e/playwright-report/
+          js/tests/e2e/*.log
         retention-days: 30
