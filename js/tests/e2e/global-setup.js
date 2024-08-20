@@ -144,11 +144,11 @@ const setupSessionFor = async (page, appName) => {
 async function globalSetup() {
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  const sessionIds = await Promise.all(
-    [AOSP_APP_NAME, AAOS_APP_NAME].map((appName) => {
-      return setupSessionFor(page, appName);
-    }),
-  );
+  const sessionIds = [];
+  for (const appName of [AOSP_APP_NAME, AAOS_APP_NAME]) {
+    const id = await setupSessionFor(page, appName);
+    sessionIds.push(id);
+  }
   process.env.AOSP_SESSION_ID = sessionIds[0];
   process.env.AAOS_SESSION_ID = sessionIds[1];
   await browser.close();
