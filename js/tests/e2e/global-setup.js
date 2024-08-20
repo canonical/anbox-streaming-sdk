@@ -25,7 +25,7 @@ import {
 require("dotenv").config({ path: ".env.local" });
 
 const APP_RETRY_LIMIT = 300;
-const SESSION_RETRY_LIMIT = 50;
+const SESSION_RETRY_LIMIT = 100;
 const ANDROID_BOOT_DELAY = 20_000;
 
 const isTestAppAvailable = async (appName) => {
