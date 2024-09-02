@@ -1135,9 +1135,13 @@ class AnboxStream {
       orientation
     );
 
-    document.getElementById(
-      this._videoID
-    ).style.transform = `rotate(${this._currentRotation}deg)`;
+    let visualElement;
+    if (this._options.experimental.upscaling.enabled) {
+      visualElement = document.getElementById(this._canvasID);
+    } else {
+      visualElement = document.getElementById(this._videoID);
+    }
+    visualElement.style.transform = `rotate(${this._currentRotation}deg)`;
     this._onResize();
     return true;
   }
