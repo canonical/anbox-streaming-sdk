@@ -3572,6 +3572,7 @@ class AnboxStreamCanvas {
     this._fragmentShader = options.fragmentShader;
 
     // Canvas
+    this._refreshID = 0;
     this._webgl = null;
     this._program = null;
     this._texture = null;
@@ -3626,6 +3627,10 @@ class AnboxStreamCanvas {
 
   stop() {
     window.clearInterval(this._fpsMeasumentlTimerId);
+    if (this._refreshID !== 0) {
+      window.cancelAnimationFrame(this._refreshID);
+      this._refreshID = 0;
+    }
   }
 
   resize(width, height) {
@@ -3664,7 +3669,9 @@ class AnboxStreamCanvas {
   }
 
   _refreshOnInterval(now) {
-    requestAnimationFrame(this._refreshOnInterval.bind(this));
+    this._refreshID = window.requestAnimationFrame(
+      this._refreshOnInterval.bind(this)
+    );
 
     let elapsed = now - this._lastRenderTime;
     if (elapsed > this._fpsInterval) {
