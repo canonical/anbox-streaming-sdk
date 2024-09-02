@@ -39,6 +39,8 @@ jobs:
       with:
         path: images
         key: anbox-images-amd64
+        restore-keys: |
+          anbox-images-amd64-
 
     - name: Import cached images
       run: |
