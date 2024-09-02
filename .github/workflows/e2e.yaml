@@ -76,7 +76,7 @@ jobs:
     - uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: playwright-report-${{ steps.datetime.outputs.datetime }}
+        name: test-data-${{ steps.datetime.outputs.datetime }}
         path: |
           js/tests/e2e/playwright-report/
           js/tests/e2e/*.log
