@@ -29,6 +29,11 @@ beforeEach(() => {
     document.webkitExitFullscreen = () => {
         document.fullscreenElement = null
     }
+    // Mock the getContext function to HTMLCanvasElement
+    window.HTMLCanvasElement.prototype.getContext = () => {
+      return {};
+    };
+
     const container = document.createElement('div')
     container.__defineGetter__('clientWidth', () => { return 100 });
     container.__defineGetter__('clientHeight', () => { return 100 });
@@ -46,6 +51,10 @@ beforeEach(() => {
     sdkOptions.foregroundActivity = 'com.bar.foo'
 
     global.navigator.__defineGetter__('userAgent', () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36');
+})
+
+afterEach(() => {
+    sdkOptions.experimental.upscaling.enabled=false;
 })
 
 test('SDK properly checks constructor options', () => {
@@ -196,29 +205,50 @@ test('video element should take all available space', () => {
 })
 
 test('rotate video element', () => {
-    const stream = new AnboxStream(sdkOptions)
-    stream._webrtcManager.sendControlMessage = jest.fn(() => { return true })
+    let test_video_rotation = function(options) {
+      const stream = new AnboxStream(options)
+      stream._webrtcManager.sendControlMessage = jest.fn(() => { return true })
 
-    const video = document.createElement('video')
-    video.id = stream._videoID
-    video.__defineGetter__('videoWidth', () => 500);
-    video.__defineGetter__('videoHeight', () => 1000);
-    const container = document.getElementById(sdkOptions.targetElement)
-    container.__defineGetter__('clientWidth', () => 1000);
-    container.__defineGetter__('clientHeight', () => 1000);
-    container.appendChild(video)
-    stream._onResize()
-    expect(stream.getCurrentOrientation()).toEqual('portrait')
+      const video = document.createElement('video')
+      video.id = stream._videoID
+      video.__defineGetter__('videoWidth', () => 500);
+      video.__defineGetter__('videoHeight', () => 1000);
+      const container = document.getElementById(sdkOptions.targetElement)
+      container.__defineGetter__('clientWidth', () => 1000);
+      container.__defineGetter__('clientHeight', () => 1000);
+      container.appendChild(video)
 
-    stream.rotate('landscape')
+      let visualElement = video
+      if (options.experimental.upscaling.enabled) {
+          const canvas = document.createElement('canvas')
+          canvas.id = stream._canvasID
+          container.appendChild(canvas)
+          visualElement = canvas
 
-    expect(video.style.transform).toEqual('rotate(90deg)')
-    expect(stream._webrtcManager.sendControlMessage.mock.calls.length).toEqual(1)
-    expect(stream._webrtcManager.sendControlMessage.mock.calls[0][0]).toEqual('screen::change_orientation')
-    expect(stream._webrtcManager.sendControlMessage.mock.calls[0][1]).toEqual({orientation: 'landscape'})
-    expect(stream.getCurrentOrientation()).toEqual('landscape')
+          stream._streamCanvas = {
+            resize() {},
+            stop() {},
+          }
+      }
 
-    expect(() => stream.disconnect()).not.toThrow()
+      stream._onResize()
+      expect(stream.getCurrentOrientation()).toEqual('portrait')
+
+      stream.rotate('landscape')
+
+      expect(visualElement.style.transform).toEqual('rotate(90deg)')
+      expect(stream._webrtcManager.sendControlMessage.mock.calls.length).toEqual(1)
+      expect(stream._webrtcManager.sendControlMessage.mock.calls[0][0]).toEqual('screen::change_orientation')
+      expect(stream._webrtcManager.sendControlMessage.mock.calls[0][1]).toEqual({orientation: 'landscape'})
+      expect(stream.getCurrentOrientation()).toEqual('landscape')
+
+      expect(() => stream.disconnect()).not.toThrow()
+    };
+
+    test_video_rotation(sdkOptions)
+
+    sdkOptions.experimental.upscaling.enabled=true;
+    test_video_rotation(sdkOptions)
 })
 
 test('request and exit full screen', () => {
