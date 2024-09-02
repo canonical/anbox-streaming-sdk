@@ -1,0 +1,6 @@
+# The Anbox team owns all for now
+*    @canonical/anbox
+
+# The UI team should be included for all JS changes
+/js   @canonical/anbox-ui
+
