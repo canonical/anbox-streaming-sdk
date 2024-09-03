@@ -3,11 +3,10 @@ name: Cache Anbox images
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 10 * * *'
+  - cron: '0 10 * * *'
 
 jobs:
   cache-images:
-    name: Cache Anbox images
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -28,13 +27,13 @@ jobs:
           image_url="$image_server_url"/"$image_path"
           curl -s "$image_url" -o images/"$product"_amd64.tar.xz
         done
-  - name: Generate cache key
-    id: cache-key
-    run: |
-      echo "value=anbox-images-amd64-$(/bin/date -u "+%Y%m%d")" >> $GITHUB_OUTPUT
-    shell: bash
-    - name: Cache all images
-      uses: actions/cache/save@v4
-      with:
-        path: images
-        key: ${{ steps.cache-key.outputs.value }}
+    - name: Generate cache key
+      id: cache-key
+      run: |
+        echo "value=anbox-images-amd64-$(/bin/date -u "+%Y%m%d")" >> $GITHUB_OUTPUT
+      shell: bash
+      - name: Cache all images
+        uses: actions/cache/save@v4
+        with:
+          path: images
+          key: ${{ steps.cache-key.outputs.value }}
