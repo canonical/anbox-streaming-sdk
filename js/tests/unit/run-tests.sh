@@ -58,5 +58,5 @@ docker run --rm \
   node:20 \
   bash -c "cd /anbox-streaming-sdk-unit-test && \
               npm install --include=dev && \
-              ./node_modules/.bin/eslint $ESLINT_ARGS anbox-stream-sdk.js && \
+              ./node_modules/.bin/eslint $ESLINT_ARGS *.js && \
               npm test"
