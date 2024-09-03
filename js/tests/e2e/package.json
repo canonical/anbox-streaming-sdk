@@ -18,7 +18,7 @@
     "prettier": "^3.2.5"
   },
   "dependencies": {
-    "axios": "^1.7.2",
+    "axios": "^1.7.4",
     "compressing": "^1.10.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
