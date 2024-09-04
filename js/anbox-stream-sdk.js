@@ -3585,6 +3585,7 @@ class AnboxStreamCanvas {
 
     // Canvas
     this._refreshID = 0;
+    this._frameCallbackID = 0;
     this._webgl = null;
     this._programs = null;
     this._fbos = {};
@@ -3652,6 +3653,10 @@ class AnboxStreamCanvas {
       window.cancelAnimationFrame(this._refreshID);
       this._refreshID = 0;
     }
+    if (this._frameCallbackID !== 0) {
+      this._video.cancelVideoFrameCallback(this._frameCallbackID);
+      this._frameCallbackID = 0;
+    }
 
     this._webgl.deleteTexture(this._texture);
     this._webgl.deleteBuffer(this._buffers.vertices);
@@ -3697,9 +3702,9 @@ class AnboxStreamCanvas {
   _refreshOnCallback() {
     const refresh = () => {
       this._render(this._webgl);
-      this._video.requestVideoFrameCallback(refresh);
+      this._frameCallbackID = this._video.requestVideoFrameCallback(refresh);
     };
-    this._video.requestVideoFrameCallback(refresh);
+    this._frameCallbackID = this._video.requestVideoFrameCallback(refresh);
   }
 
   _refreshOnInterval(now) {
