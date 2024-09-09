@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Create branch
-      uses: actions/github-script@v7
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
       with:
         script: |
           await github.rest.git.createRef({
@@ -31,7 +31,7 @@ jobs:
 
     - name: Checkout repository
       if: inputs.bump_up_base_version == 'true' && startsWith(inputs.branch_name, 'stable-')
-      uses: actions/checkout@v4
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
 
     - name: Update base version
       if: inputs.bump_up_base_version == 'true' && startsWith(inputs.branch_name, 'stable-')
