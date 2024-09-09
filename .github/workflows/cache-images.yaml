@@ -9,7 +9,7 @@ jobs:
   cache-images:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
     - name: Download images
       env:
         IMAGE_SERVER_BUCKET: nightly
@@ -33,7 +33,7 @@ jobs:
         echo "value=anbox-images-amd64-$(/bin/date -u "+%Y%m%d")" >> $GITHUB_OUTPUT
       shell: bash
     - name: Cache all images
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4
       with:
         path: images
         key: ${{ steps.cache-key.outputs.value }}
