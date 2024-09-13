@@ -20,6 +20,6 @@ docker run --rm \
   -v "$ANBOX_STREAMING_SDK_DIR:/anbox-streaming-sdk-js" \
   node:20 \
   bash -c "cd /anbox-streaming-sdk-js/tests/e2e && \
-           npm install && \
+           npm ci && \
            npx playwright install --with-deps && \
            npx playwright test"
