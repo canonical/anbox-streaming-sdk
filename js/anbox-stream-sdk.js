@@ -2036,12 +2036,11 @@ const _imeEventType = {
 
 const _maxTouchPointSize = 10;
 
-const _vertexShaderSource = `
+const _vertexShaderSource = `#version 300 es
 precision mediump float;
-
-attribute vec2 aVertexPos;
-attribute vec2 aTextureCoord;
-varying highp vec2 vTextureCoord;
+in vec2 aVertexPos;
+in vec2 aTextureCoord;
+out highp vec2 vTextureCoord;
 
 void main()
 {
@@ -2050,19 +2049,20 @@ void main()
 }
 `;
 
-const _fragShaderSource = `
+const _fragShaderSource = `#version 300 es
 precision mediump float;
-uniform vec2 uResolution;
 uniform sampler2D uSampler;
-varying highp vec2 vTextureCoord;
+in highp vec2 vTextureCoord;
+out vec4 outColor;
 
 void main()
 {
-    gl_FragColor = texture2D(uSampler, vTextureCoord);
+  outColor = texture(uSampler, vTextureCoord);
 }
 `;
 
-const _fsrShaderSource = `/*
+const _fsrShaderSource = `#version 300 es
+/*
   Original:https://www.shadertoy.com/view/stXSWB
   by goingdigital
 
@@ -2082,7 +2082,8 @@ precision mediump float;
 uniform float sharpness;
 uniform vec2  uResolution;
 uniform sampler2D uSampler;
-varying highp vec2 vTextureCoord;
+in highp vec2 vTextureCoord;
+out vec4 outColor;
 
 /***** RCAS *****/
 #define FSR_RCAS_LIMIT (0.25-(1.0/16.0))
@@ -2155,7 +2156,7 @@ vec3 FsrRcasF(
 }
 
 vec4 FsrRcasLoadF(vec2 p) {
-    return texture2D(uSampler, p/uResolution.xy);
+    return texture(uSampler, p/uResolution.xy);
 }
 
 void main()
@@ -2166,8 +2167,7 @@ void main()
     FsrRcasCon(con,sharpness);
 
     vec3 col = FsrRcasF(vTextureCoord, con);
-
-    gl_FragColor = vec4(col, 1.0);
+    outColor = vec4(col, 1.0);
 }
 `;
 
