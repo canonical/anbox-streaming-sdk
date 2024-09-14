@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <meta content="utf-8" http-equiv="encoding">
+    <title>Anbox Streaming SDK Example - Enable video upscaling with Snapdragon™ Game Super Resolution(SGSR) </title>
+</head>
+
+<body>
+<script type="module">
+    import {AnboxStream, AnboxStreamGatewayConnector} from './anbox-stream-sdk.js';
+
+    // Connectors will enable communication between the client and the
+    // gateway. They can be customized to add an additional layer between
+    // the client and the gateway in order to add more features (user management,
+    // limits, analytics, etc).
+    // For instance, to add user management, you would create a connector that
+    // would communicate with a service you own, which in turn would talk to the
+    // stream gateway to create an actual streaming session.
+    // The connector would pass that session information to the SDK which takes
+    // care of the rest.
+    const connector = new AnboxStreamGatewayConnector({
+        url: 'https://gateway.url.net',
+        authToken: 'YOUR_AUTH_TOKEN',
+        session: {
+            app: "com.foo.bar"
+        },
+        screen: {
+            width: 1280,
+            height: 720,
+            fps: 25,
+        }
+    });
+
+    // The AnboxStream class takes care of the WebRTC signaling process as
+    // well as the web browser integration (inserting video/audio, controls, inputs, etc)
+    let stream = new AnboxStream({
+        connector: connector,
+        targetElement: "anbox-stream",
+        controls: {
+            keyboard: true
+        },
+        experimental: {
+            upscaling: {
+                enabled: true,
+                fragmentShaders: [
+                  `#version 300 es
+                  /*
+                     Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+                                 SPDX-License-Identifier: BSD-3-Clause
+
+                           https://github.com/SnapdragonStudios/snapdragon-gsr
+                  */
+
+                  precision mediump float;
+                  precision highp int;
+
+                  ////////////////////////
+                  // USER CONFIGURATION //
+                  ////////////////////////
+
+                  /*
+                  * Operation modes:
+                  * RGBA -> 1
+                  * RGBY -> 3
+                  * LERP -> 4
+                  */
+                  #define OperationMode 1
+                  #define EdgeThreshold 8.0/255.0
+                  #define EdgeSharpness 2.0
+
+                  uniform vec2  uResolution;
+                  in highp vec2 vTextureCoord;
+                  out vec4 outColor;
+
+                  uniform mediump sampler2D uSampler;
+
+                  float fastLanczos2(float x)
+                  {
+                    float wA = x-4.0;
+                    float wB = x*wA-wA;
+                    wA *= wA;
+                    return wB*wA;
+                  }
+
+                  vec2 weightY(float dx, float dy,float c, float std)
+                  {
+                    float x = ((dx*dx)+(dy* dy))* 0.55 + clamp(abs(c)*std, 0.0, 1.0);
+                    float w = fastLanczos2(x);
+                    return vec2(w, w * c);
+                  }
+
+                  // Workaround the textureGather function which is unavailable in WebGL2
+                  vec4 texelGather(sampler2D tex, vec2 uv, vec2 texelSize, int channel) {
+                    vec4 t0 = texture(tex, uv + texelSize * vec2(-0.5, -0.5));
+                    vec4 t1 = texture(tex, uv + texelSize * vec2( 0.5, -0.5));
+                    vec4 t2 = texture(tex, uv + texelSize * vec2(-0.5,  0.5));
+                    vec4 t3 = texture(tex, uv + texelSize * vec2( 0.5,  0.5));
+
+                    float c0 = (channel == 0) ? t0.r : (channel == 1) ? t0.g : (channel == 2) ? t0.b : t0.a;
+                    float c1 = (channel == 0) ? t1.r : (channel == 1) ? t1.g : (channel == 2) ? t1.b : t1.a;
+                    float c2 = (channel == 0) ? t2.r : (channel == 1) ? t2.g : (channel == 2) ? t2.b : t2.a;
+                    float c3 = (channel == 0) ? t3.r : (channel == 1) ? t3.g : (channel == 2) ? t3.b : t3.a;
+
+                    return vec4(c0, c1, c2, c3);
+                  }
+
+                  void main()
+                  {
+                    highp vec4 ViewportInfo[1];
+                    int mode = OperationMode;
+                    float edgeThreshold = EdgeThreshold;
+                    float edgeSharpness = EdgeSharpness;
+
+                    ViewportInfo[0] = vec4(1.0 / uResolution.x, 1.0 / uResolution.y,
+                                           uResolution.x, uResolution.y);
+
+                    vec4 color;
+                    if(mode == 1)
+                      color.xyz = textureLod(uSampler, vTextureCoord.xy, 0.0).xyz;
+                    else
+                      color.xyzw = textureLod(uSampler, vTextureCoord.xy, 0.0).xyzw;
+
+                    /*
+                    highp float xCenter;
+                    xCenter = abs(vTextureCoord.x+-0.5);
+                    highp float yCenter;
+                    yCenter = abs(vTextureCoord.y+-0.5);
+                    */
+
+                    //todo: config the SR region based on needs
+                    //if ( mode!=4 && xCenter*xCenter+yCenter*yCenter<=0.4 * 0.4)
+                    if (mode!=4)
+                    {
+                      highp vec2 imgCoord = ((vTextureCoord.xy*ViewportInfo[0].zw)+vec2(-0.5,0.5));
+                      highp vec2 imgCoordPixel = floor(imgCoord);
+                      highp vec2 coord = (imgCoordPixel*ViewportInfo[0].xy);
+                      vec2 pl = (imgCoord+(-imgCoordPixel));
+
+                      vec4 left = texelGather(uSampler, coord, ViewportInfo[0].xy, mode);
+
+                      float edgeVote = abs(left.z - left.y) + abs(color[mode] - left.y)  + abs(color[mode] - left.z) ;
+                      if(edgeVote > edgeThreshold)
+                      {
+                        coord.x += ViewportInfo[0].x;
+
+                        vec4 right = texelGather(uSampler,coord + vec2(ViewportInfo[0].x, 0.0), ViewportInfo[0].xy, mode);
+                        vec4 upDown;
+                        upDown.xy = texelGather(uSampler,coord + vec2(0.0, -ViewportInfo[0].y), ViewportInfo[0].xy, mode).wz;
+                        upDown.zw = texelGather(uSampler,coord+ vec2(0.0, ViewportInfo[0].y), ViewportInfo[0].xy, mode).yx;
+
+                        float mean = (left.y+left.z+right.x+right.w)*0.25;
+                        left = left - vec4(mean);
+                        right = right - vec4(mean);
+                        upDown = upDown - vec4(mean);
+                        color.w =color[mode] - mean;
+
+                        float sum = (((((abs(left.x)+abs(left.y))+abs(left.z))+abs(left.w))+(((abs(right.x)+abs(right.y))+abs(right.z))+abs(right.w)))+(((abs(upDown.x)+abs(upDown.y))+abs(upDown.z))+abs(upDown.w)));
+                        float std = 2.181818/sum;
+
+                        vec2 aWY = weightY(pl.x, pl.y+1.0, upDown.x,std);
+                        aWY += weightY(pl.x-1.0, pl.y+1.0, upDown.y,std);
+                        aWY += weightY(pl.x-1.0, pl.y-2.0, upDown.z,std);
+                        aWY += weightY(pl.x, pl.y-2.0, upDown.w,std);
+                        aWY += weightY(pl.x+1.0, pl.y-1.0, left.x,std);
+                        aWY += weightY(pl.x, pl.y-1.0, left.y,std);
+                        aWY += weightY(pl.x, pl.y, left.z,std);
+                        aWY += weightY(pl.x+1.0, pl.y, left.w,std);
+                        aWY += weightY(pl.x-1.0, pl.y-1.0, right.x,std);
+                        aWY += weightY(pl.x-2.0, pl.y-1.0, right.y,std);
+                        aWY += weightY(pl.x-2.0, pl.y, right.z,std);
+                        aWY += weightY(pl.x-1.0, pl.y, right.w,std);
+
+                        float finalY = aWY.y/aWY.x;
+
+                        float maxY = max(max(left.y,left.z),max(right.x,right.w));
+                        float minY = min(min(left.y,left.z),min(right.x,right.w));
+                        finalY = clamp(edgeSharpness*finalY, minY, maxY);
+
+                        float deltaY = finalY -color.w;
+
+                        //smooth high contrast input
+                        deltaY = clamp(deltaY, -23.0 / 255.0, 23.0 / 255.0);
+
+                        color.x = clamp((color.x+deltaY),0.0,1.0);
+                        color.y = clamp((color.y+deltaY),0.0,1.0);
+                        color.z = clamp((color.z+deltaY),0.0,1.0);
+                      }
+                    }
+
+                    color.w = 1.0;  //assume alpha channel is not used
+                    outColor = color;
+                  }`
+                ]
+            }
+        },
+        callbacks: {
+            error: error => {
+                window.alert("AnboxStream failed: " + error.message);
+            },
+            requestCameraAccess: () => {
+                return window.confirm("Anbox Cloud requires to access the camera device")
+            }
+        }
+    });
+
+    window.startStream = () => {
+        stream.connect();
+    }
+
+</script>
+    <h1>Anbox Streaming SDK Example - Enable video upscaling with
+     <a href="https://github.com/SnapdragonStudios/snapdragon-gsr" target="_blank"> Snapdragon™ Game Super Resolution (SGSR) </a>
+    </h1>
+    <button onclick="window.startStream()">Start</button>
+    <div id="anbox-stream" style="width: 100vw; height: 100vh;"></div>
+    <footer style="margin-top: 20px; font-size: 0.8em;">
+        <p>Snapdragon™ is a trademark of Qualcomm Incorporated. This project is not affiliated with or endorsed by Qualcomm.</p>
+    </footer>
+</body>
+</html>
