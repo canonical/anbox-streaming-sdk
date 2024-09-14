@@ -566,8 +566,7 @@ class AnboxStream {
   _hasWebGLSupported() {
     try {
       const canvas = document.createElement("canvas");
-      const ctx =
-        canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+      const ctx = canvas.getContext("webgl2");
       if (this._nullOrUndef(ctx)) return false;
     } catch (e) {
       return false;
@@ -3599,7 +3598,7 @@ class AnboxStreamCanvas {
     canvas.style.position = "absolute";
     canvas.id = this._canvasID;
 
-    const gl = canvas.getContext("webgl");
+    const gl = canvas.getContext("webgl2");
     const programs = this._loadPrograms(gl);
     if (this._nullOrUndef(programs) || programs.length === 0) {
       throw newError(
