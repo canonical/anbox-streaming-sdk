@@ -104,6 +104,19 @@ jobs:
       if: failure()
       run: |
         sudo snap logs -n all anbox-cloud-appliance > appliance.log
+        sudo anbox-cloud-appliance.buginfo > appliance.buginfo
+        for id in $(amc ls --format=csv | cut -d',' -f1) ; do
+          status=$(amc show "$id" --format=json | jq -r .status)
+          if [ "$status" = error ] ; then
+            for log in $(amc show "$id" --format=json | jq -r '.stored_logs[]' | xargs) ; do
+              amc show-log "$id" "$log" |& tee -a "$id"_"$log"
+            done
+          elif [ "$status" = started ] || [ "$status" = running ]; then
+            for name in android anbox ; do
+              timeout 30s amc logs "$id" -t "$name" |& tee -a "$id"_"$name".log
+            done
+          fi
+        done
 
     - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
       if: always()
@@ -112,4 +125,6 @@ jobs:
         path: |
           js/tests/e2e/playwright-report/
           js/tests/e2e/*.log
+          appliance.buginfo
+          *.log
         retention-days: 30
