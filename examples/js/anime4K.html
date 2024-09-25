@@ -44,7 +44,6 @@ uniform sampler2D uSampler;
 in mediump vec2 vTextureCoord;
 out vec4 outColor;
 
-//!DESC Anime4K-v4.0-Restore-CNN-(S)-Conv-4x3x3x3
 #define go_0(x_off, y_off) texture(uSampler, (vec2(vTextureCoord * uResolution.xy) + vec2(x_off, y_off)) / uResolution.xy)
 vec4 hook() {
     vec4 result = mat4(6.5515305e-05, 0.09565814, -0.0022499533, 0.14627136, -0.0065872427, 0.1441769, 0.17772098, 0.16298898, 0.03727593, 0.02010636, 0.013131043, 0.07891907, 0.0, 0.0, 0.0, 0.0) * go_0(-1.0, -1.0);
@@ -104,7 +103,6 @@ vec4 hook() {
 
 void main()
 {
-//    outColor = vec4(-0.4, 0.1, 0.83, 0.9);
     outColor = hook();
 }`
 
@@ -147,7 +145,6 @@ vec4 hook() {
 
 void main()
 {
-//    outColor = vec4(-0.0, 0.7, 0.23, 0.2);
     outColor = hook();
 }`
 
