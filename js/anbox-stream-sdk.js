@@ -3586,7 +3586,7 @@ class AnboxStreamCanvas {
     this._refreshID = 0;
     this._frameCallbackID = 0;
     this._webgl = null;
-    this._programs = null;
+    this._shaders = null;
     this._fbos = {};
     this._buffers = {};
     this._texture = null;
@@ -3599,14 +3599,14 @@ class AnboxStreamCanvas {
     canvas.id = this._canvasID;
 
     const gl = canvas.getContext("webgl2");
-    const programs = this._loadPrograms(gl);
-    if (this._nullOrUndef(programs) || programs.length === 0) {
+    const shaders = this._loadShaders(gl);
+    if (this._nullOrUndef(shaders) || shaders.length === 0) {
       throw newError(
-        "Failed to load shader program",
+        "Failed to load shaders",
         ANBOX_STREAM_SDK_ERROR_INTERNAL
       );
     }
-    this._programs = programs;
+    this._shaders = shaders;
     this._buffers = this._initializeBuffers(gl);
 
     this._webgl = gl;
@@ -3660,8 +3660,8 @@ class AnboxStreamCanvas {
     this._webgl.deleteTexture(this._texture);
     this._webgl.deleteBuffer(this._buffers.vertices);
     this._webgl.deleteBuffer(this._buffers.indices);
-    for (const program of this._programs) {
-      this._webgl.deleteProgram(program);
+    for (const shader of this._shaders) {
+      this._webgl.deleteProgram(shader.program);
     }
     for (const buffer of this._fbos.buffers) {
       this._webgl.deleteFramebuffer(buffer);
@@ -3720,8 +3720,8 @@ class AnboxStreamCanvas {
     }
   }
 
-  _loadPrograms(gl) {
-    let programs = [];
+  _loadShaders(gl) {
+    let shaders = [];
     if (
       this._nullOrUndef(this._fragmentShaders) ||
       this._fragmentShaders.length === 0
@@ -3733,15 +3733,15 @@ class AnboxStreamCanvas {
     // the texture on the canvas after all multi-pass shaders have been applied.
     this._fragmentShaders.push(_fragShaderSource);
     for (const index in this._fragmentShaders) {
-      const program = this._loadShader(
+      const shader = this._loadShader(
         gl,
         _vertexShaderSource,
         this._fragmentShaders[index]
       );
-      programs.push(program);
+      shaders.push(shader);
     }
 
-    return programs;
+    return shaders;
   }
 
   _loadShader(gl, verShaderSource, fragShaderSource) {
@@ -3789,7 +3789,13 @@ class AnboxStreamCanvas {
     gl.deleteShader(vertexShader);
     gl.deleteShader(fragmentShader);
 
-    return program;
+    return {
+      program: program,
+      uSampler: gl.getUniformLocation(program, "uSampler"),
+      uResolution: gl.getUniformLocation(program, "uResolution"),
+      aVerPos: gl.getAttribLocation(program, "aVertexPos"),
+      aTexCoord: gl.getAttribLocation(program, "aTextureCoord"),
+    };
   }
 
   _initializeTexture(gl) {
@@ -3899,11 +3905,11 @@ class AnboxStreamCanvas {
     );
 
     // Update viewport in case that the window resize happens
-    for (let i = 0; i < this._programs.length; i++) {
-      const program = this._programs[i];
+    for (let i = 0; i < this._shaders.length; i++) {
+      const shader = this._shaders[i];
       const index = i % 2;
-      if (i === this._programs.length - 1) {
-        // Draw the texture onto the screen if the last program is in use.
+      if (i === this._shaders.length - 1) {
+        // Draw the texture onto the screen if the last shader is in use.
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       } else {
         // Draw the texture onto framebuffers as the sources for the post-processing.
@@ -3912,38 +3918,31 @@ class AnboxStreamCanvas {
 
       gl.bindBuffer(gl.ARRAY_BUFFER, this._buffers.vertices);
 
-      let positionAttribLocation = gl.getAttribLocation(program, "aVertexPos");
       gl.vertexAttribPointer(
-        positionAttribLocation,
+        shader.aVerPos,
         2,
         gl.FLOAT,
         gl.FALSE,
         4 * Float32Array.BYTES_PER_ELEMENT,
         0
       );
-      gl.enableVertexAttribArray(positionAttribLocation);
+      gl.enableVertexAttribArray(shader.aVerPos);
 
-      let texCoordAttribLocation = gl.getAttribLocation(
-        program,
-        "aTextureCoord"
-      );
       gl.vertexAttribPointer(
-        texCoordAttribLocation,
+        shader.aTexCoord,
         2,
         gl.FLOAT,
         gl.FALSE,
         4 * Float32Array.BYTES_PER_ELEMENT,
         2 * Float32Array.BYTES_PER_ELEMENT // offset for texture coordinate in vertices
       );
-      gl.enableVertexAttribArray(texCoordAttribLocation);
+      gl.enableVertexAttribArray(shader.aTexCoord);
 
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._buffers.indices);
 
-      gl.useProgram(program);
-      let uSampler = gl.getUniformLocation(program, "uSampler");
-      let uResolution = gl.getUniformLocation(program, "uResolution");
-      gl.uniform1i(uSampler, 0);
-      gl.uniform2f(uResolution, gl.canvas.width, gl.canvas.height);
+      gl.useProgram(shader.program);
+      gl.uniform1i(shader.uSampler, 0);
+      gl.uniform2f(shader.uResolution, gl.canvas.width, gl.canvas.height);
 
       gl.activeTexture(gl.TEXTURE0);
       gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
