@@ -6,6 +6,7 @@ RUN mkdir -p /app/demos
 
 COPY example.html /app/demos
 COPY sgsr.html /app/demos
+COPY anime4K.html /app/demos
 COPY anbox-stream-sdk.js /app
 COPY serve.py /app
 
