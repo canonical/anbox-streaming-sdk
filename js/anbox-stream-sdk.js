@@ -3590,6 +3590,7 @@ class AnboxStreamCanvas {
     this._fbos = {};
     this._buffers = {};
     this._texture = null;
+    this._enableblend = false;
   }
 
   initialize() {
@@ -3601,12 +3602,15 @@ class AnboxStreamCanvas {
     const gl = canvas.getContext("webgl2");
     const shaders = this._loadShaders(gl);
     if (this._nullOrUndef(shaders) || shaders.length === 0) {
-      throw newError(
-        "Failed to load shaders",
-        ANBOX_STREAM_SDK_ERROR_INTERNAL
-      );
+      throw newError("Failed to load shaders", ANBOX_STREAM_SDK_ERROR_INTERNAL);
     }
     this._shaders = shaders;
+    for (const shader of this._shaders) {
+      if (shader.uVideoSrc !== null) {
+        this._enableblend = true;
+        break;
+      }
+    }
     this._buffers = this._initializeBuffers(gl);
 
     this._webgl = gl;
@@ -3792,6 +3796,7 @@ class AnboxStreamCanvas {
     return {
       program: program,
       uSampler: gl.getUniformLocation(program, "uSampler"),
+      uVideoSrc: gl.getUniformLocation(program, "uVideoSrc"),
       uResolution: gl.getUniformLocation(program, "uResolution"),
       aVerPos: gl.getAttribLocation(program, "aVertexPos"),
       aTexCoord: gl.getAttribLocation(program, "aTextureCoord"),
@@ -3885,11 +3890,23 @@ class AnboxStreamCanvas {
   }
 
   _render(gl) {
+    // Only enable blend when required
+    if (this._enableblend) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
+
     // Update viewport in case that the window resize happens
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Clear the fbos which are used for th post-processing
+    for (const buffer of this._fbos.buffers) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, buffer);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
 
     gl.bindTexture(gl.TEXTURE_2D, this._texture);
 
@@ -3944,10 +3961,15 @@ class AnboxStreamCanvas {
       gl.uniform1i(shader.uSampler, 0);
       gl.uniform2f(shader.uResolution, gl.canvas.width, gl.canvas.height);
 
-      gl.activeTexture(gl.TEXTURE0);
+      if (shader.uVideoSrc !== null) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this._texture);
+        gl.uniform1i(shader.uVideoSrc, 1);
+      }
       gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
 
       // Swap the texture as the source for the next draw.
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._fbos.textures[index]);
     }
 
