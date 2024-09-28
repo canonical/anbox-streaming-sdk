@@ -566,8 +566,7 @@ class AnboxStream {
   _hasWebGLSupported() {
     try {
       const canvas = document.createElement("canvas");
-      const ctx =
-        canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+      const ctx = canvas.getContext("webgl2");
       if (this._nullOrUndef(ctx)) return false;
     } catch (e) {
       return false;
@@ -2037,12 +2036,11 @@ const _imeEventType = {
 
 const _maxTouchPointSize = 10;
 
-const _vertexShaderSource = `
+const _vertexShaderSource = `#version 300 es
 precision mediump float;
-
-attribute vec2 aVertexPos;
-attribute vec2 aTextureCoord;
-varying highp vec2 vTextureCoord;
+in vec2 aVertexPos;
+in vec2 aTextureCoord;
+out highp vec2 vTextureCoord;
 
 void main()
 {
@@ -2051,19 +2049,20 @@ void main()
 }
 `;
 
-const _fragShaderSource = `
+const _fragShaderSource = `#version 300 es
 precision mediump float;
-uniform vec2 uResolution;
 uniform sampler2D uSampler;
-varying highp vec2 vTextureCoord;
+in highp vec2 vTextureCoord;
+out vec4 outColor;
 
 void main()
 {
-    gl_FragColor = texture2D(uSampler, vTextureCoord);
+  outColor = texture(uSampler, vTextureCoord);
 }
 `;
 
-const _fsrShaderSource = `/*
+const _fsrShaderSource = `#version 300 es
+/*
   Original:https://www.shadertoy.com/view/stXSWB
   by goingdigital
 
@@ -2083,7 +2082,8 @@ precision mediump float;
 uniform float sharpness;
 uniform vec2  uResolution;
 uniform sampler2D uSampler;
-varying highp vec2 vTextureCoord;
+in highp vec2 vTextureCoord;
+out vec4 outColor;
 
 /***** RCAS *****/
 #define FSR_RCAS_LIMIT (0.25-(1.0/16.0))
@@ -2156,7 +2156,7 @@ vec3 FsrRcasF(
 }
 
 vec4 FsrRcasLoadF(vec2 p) {
-    return texture2D(uSampler, p/uResolution.xy);
+    return texture(uSampler, p/uResolution.xy);
 }
 
 void main()
@@ -2167,8 +2167,7 @@ void main()
     FsrRcasCon(con,sharpness);
 
     vec3 col = FsrRcasF(vTextureCoord, con);
-
-    gl_FragColor = vec4(col, 1.0);
+    outColor = vec4(col, 1.0);
 }
 `;
 
@@ -3587,10 +3586,11 @@ class AnboxStreamCanvas {
     this._refreshID = 0;
     this._frameCallbackID = 0;
     this._webgl = null;
-    this._programs = null;
+    this._shaders = null;
     this._fbos = {};
     this._buffers = {};
     this._texture = null;
+    this._enableblend = false;
   }
 
   initialize() {
@@ -3599,15 +3599,18 @@ class AnboxStreamCanvas {
     canvas.style.position = "absolute";
     canvas.id = this._canvasID;
 
-    const gl = canvas.getContext("webgl");
-    const programs = this._loadPrograms(gl);
-    if (this._nullOrUndef(programs) || programs.length === 0) {
-      throw newError(
-        "Failed to load shader program",
-        ANBOX_STREAM_SDK_ERROR_INTERNAL
-      );
+    const gl = canvas.getContext("webgl2");
+    const shaders = this._loadShaders(gl);
+    if (this._nullOrUndef(shaders) || shaders.length === 0) {
+      throw newError("Failed to load shaders", ANBOX_STREAM_SDK_ERROR_INTERNAL);
     }
-    this._programs = programs;
+    this._shaders = shaders;
+    for (const shader of this._shaders) {
+      if (shader.uVideoSrc !== null) {
+        this._enableblend = true;
+        break;
+      }
+    }
     this._buffers = this._initializeBuffers(gl);
 
     this._webgl = gl;
@@ -3661,8 +3664,8 @@ class AnboxStreamCanvas {
     this._webgl.deleteTexture(this._texture);
     this._webgl.deleteBuffer(this._buffers.vertices);
     this._webgl.deleteBuffer(this._buffers.indices);
-    for (const program of this._programs) {
-      this._webgl.deleteProgram(program);
+    for (const shader of this._shaders) {
+      this._webgl.deleteProgram(shader.program);
     }
     for (const buffer of this._fbos.buffers) {
       this._webgl.deleteFramebuffer(buffer);
@@ -3721,8 +3724,8 @@ class AnboxStreamCanvas {
     }
   }
 
-  _loadPrograms(gl) {
-    let programs = [];
+  _loadShaders(gl) {
+    let shaders = [];
     if (
       this._nullOrUndef(this._fragmentShaders) ||
       this._fragmentShaders.length === 0
@@ -3734,15 +3737,15 @@ class AnboxStreamCanvas {
     // the texture on the canvas after all multi-pass shaders have been applied.
     this._fragmentShaders.push(_fragShaderSource);
     for (const index in this._fragmentShaders) {
-      const program = this._loadShader(
+      const shader = this._loadShader(
         gl,
         _vertexShaderSource,
         this._fragmentShaders[index]
       );
-      programs.push(program);
+      shaders.push(shader);
     }
 
-    return programs;
+    return shaders;
   }
 
   _loadShader(gl, verShaderSource, fragShaderSource) {
@@ -3790,7 +3793,14 @@ class AnboxStreamCanvas {
     gl.deleteShader(vertexShader);
     gl.deleteShader(fragmentShader);
 
-    return program;
+    return {
+      program: program,
+      uSampler: gl.getUniformLocation(program, "uSampler"),
+      uVideoSrc: gl.getUniformLocation(program, "uVideoSrc"),
+      uResolution: gl.getUniformLocation(program, "uResolution"),
+      aVerPos: gl.getAttribLocation(program, "aVertexPos"),
+      aTexCoord: gl.getAttribLocation(program, "aTextureCoord"),
+    };
   }
 
   _initializeTexture(gl) {
@@ -3880,11 +3890,23 @@ class AnboxStreamCanvas {
   }
 
   _render(gl) {
+    // Only enable blend when required
+    if (this._enableblend) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
+
     // Update viewport in case that the window resize happens
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Clear the fbos which are used for th post-processing
+    for (const buffer of this._fbos.buffers) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, buffer);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
 
     gl.bindTexture(gl.TEXTURE_2D, this._texture);
 
@@ -3900,11 +3922,11 @@ class AnboxStreamCanvas {
     );
 
     // Update viewport in case that the window resize happens
-    for (let i = 0; i < this._programs.length; i++) {
-      const program = this._programs[i];
+    for (let i = 0; i < this._shaders.length; i++) {
+      const shader = this._shaders[i];
       const index = i % 2;
-      if (i === this._programs.length - 1) {
-        // Draw the texture onto the screen if the last program is in use.
+      if (i === this._shaders.length - 1) {
+        // Draw the texture onto the screen if the last shader is in use.
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       } else {
         // Draw the texture onto framebuffers as the sources for the post-processing.
@@ -3913,43 +3935,41 @@ class AnboxStreamCanvas {
 
       gl.bindBuffer(gl.ARRAY_BUFFER, this._buffers.vertices);
 
-      let positionAttribLocation = gl.getAttribLocation(program, "aVertexPos");
       gl.vertexAttribPointer(
-        positionAttribLocation,
+        shader.aVerPos,
         2,
         gl.FLOAT,
         gl.FALSE,
         4 * Float32Array.BYTES_PER_ELEMENT,
         0
       );
-      gl.enableVertexAttribArray(positionAttribLocation);
+      gl.enableVertexAttribArray(shader.aVerPos);
 
-      let texCoordAttribLocation = gl.getAttribLocation(
-        program,
-        "aTextureCoord"
-      );
       gl.vertexAttribPointer(
-        texCoordAttribLocation,
+        shader.aTexCoord,
         2,
         gl.FLOAT,
         gl.FALSE,
         4 * Float32Array.BYTES_PER_ELEMENT,
         2 * Float32Array.BYTES_PER_ELEMENT // offset for texture coordinate in vertices
       );
-      gl.enableVertexAttribArray(texCoordAttribLocation);
+      gl.enableVertexAttribArray(shader.aTexCoord);
 
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._buffers.indices);
 
-      gl.useProgram(program);
-      let uSampler = gl.getUniformLocation(program, "uSampler");
-      let uResolution = gl.getUniformLocation(program, "uResolution");
-      gl.uniform1i(uSampler, 0);
-      gl.uniform2f(uResolution, gl.canvas.width, gl.canvas.height);
+      gl.useProgram(shader.program);
+      gl.uniform1i(shader.uSampler, 0);
+      gl.uniform2f(shader.uResolution, gl.canvas.width, gl.canvas.height);
 
-      gl.activeTexture(gl.TEXTURE0);
+      if (shader.uVideoSrc !== null) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this._texture);
+        gl.uniform1i(shader.uVideoSrc, 1);
+      }
       gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
 
       // Swap the texture as the source for the next draw.
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._fbos.textures[index]);
     }
 
