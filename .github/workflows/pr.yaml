@@ -66,6 +66,7 @@ jobs:
     - name: Tune installation
       run: |
         amc config set container.security_updates false
+        lxc config set --project anbox-cloud images.compression_algorithm=none
 
     - name: Restore cached images
       uses: actions/cache/restore@v4
