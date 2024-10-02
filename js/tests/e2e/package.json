@@ -9,7 +9,7 @@
   "license": "Proprietary",
   "devDependencies": {
     "@eslint/js": "^9.3.0",
-    "@playwright/test": "^1.44.0",
+    "@playwright/test": "^1.47.2",
     "@types/node": "^20.12.12",
     "eslint": "^9.3.0",
     "eslint-config-prettier": "^9.1.0",

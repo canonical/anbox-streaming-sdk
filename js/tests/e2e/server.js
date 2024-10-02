@@ -259,6 +259,6 @@ app.post("/join", (req, res) => {
       res.send(response.data);
     })
     .catch((error) => {
-      res.status(500).send(error);
+      res.status(500).send(error.response);
     });
 });
