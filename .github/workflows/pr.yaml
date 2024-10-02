@@ -45,6 +45,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4
+      with:
+        node-version: 20
+
     - name: Store current date and time in output
       id: datetime
       run: echo "datetime=$(date -u +'%Y-%m-%dT%H.%M.%SZ')" >> $GITHUB_OUTPUT
@@ -98,7 +102,9 @@ jobs:
     - name: Run tests
       working-directory: js/tests/e2e
       run: |
-        ./run-tests.sh
+        npm install
+        npx playwright install --with-deps
+        npx playwright test
 
     - name: Dump logs
       if: failure()
