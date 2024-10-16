@@ -2,9 +2,11 @@ FROM ubuntu:18.04
 
 RUN apt update && apt upgrade -y && apt install -y python3
 
-RUN mkdir /app
+RUN mkdir -p /app/demos
 
-COPY example.html /app
+COPY example.html /app/demos
+COPY sgsr.html /app/demos
+COPY anime4K.html /app/demos
 COPY anbox-stream-sdk.js /app
 COPY serve.py /app
 

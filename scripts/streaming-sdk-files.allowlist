@@ -196,6 +196,8 @@ examples/js/run.sh
 examples/js/Dockerfile
 examples/js/README.md
 examples/js/example.html
+examples/js/sgsr.html
+examples/js/anime4K.html
 examples/js/serve.py
 js/anbox-stream-sdk.js
 js/README.md

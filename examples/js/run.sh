@@ -27,4 +27,4 @@ docker build . -t anbox-stream-sdk-example:latest
 id=$(docker run -d --rm -p 8000:8000 anbox-stream-sdk-example:latest)
 echo "$id" > .last_docker_id
 
-echo "INFO: Container up and running, open http://localhost:8000/example.html in your browser ..."
+echo "INFO: Container up and running, open http://localhost:8000/demos in your browser ..."
