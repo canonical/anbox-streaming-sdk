@@ -170,11 +170,10 @@ app.get("/asgApplications", (_req, res) => {
     });
 });
 
-app.get("/sessions", (_req, res) => {
+app.get("/instances", (_req, res) => {
   axios
-    .get(`${process.env.ASG_API_URL}/1.0/sessions?recursion=1`, {
-      headers: asgHeaders,
-      httpsAgent: asgAgent,
+    .get(`${process.env.AMS_API_URL}/1.0/instances?recursion=1`, {
+      httpsAgent: amsAgent,
     })
     .then((response) => {
       res.send(response.data.metadata);
@@ -184,23 +183,23 @@ app.get("/sessions", (_req, res) => {
     });
 });
 
-app.delete("/session", (req, res) => {
-  const appName = req.query.name;
+app.delete("/instance", (req, res) => {
+  const sessionId = req.query.sessionId;
   axios
-    .get(`${process.env.ASG_API_URL}/1.0/sessions?recursion=1`, {
-      headers: asgHeaders,
-      httpsAgent: asgAgent,
+    .get(`${process.env.AMS_API_URL}/1.0/instances?recursion=1`, {
+      httpsAgent: amsAgent,
     })
     .then((response) => {
-      const sessions = response.data.metadata;
-      const id = sessions.find((session) => session.app === appName).id;
-      if (!id) {
-        res.status(404).send("Session not found");
+      const instances = response.data.metadata;
+      const instance = instances.find((instance) =>
+        instance.tags.includes(`session=${sessionId}`),
+      );
+      if (!instance) {
+        res.status(404).send("Instance not found");
       } else {
         axios
-          .delete(`${process.env.ASG_API_URL}/1.0/sessions/${id}`, {
-            headers: asgHeaders,
-            httpsAgent: asgAgent,
+          .delete(`${process.env.AMS_API_URL}/1.0/instances/${instance.id}`, {
+            httpsAgent: amsAgent,
           })
           .then((response) => {
             res.send(response.data);
@@ -215,29 +214,48 @@ app.delete("/session", (req, res) => {
     });
 });
 
-app.post("/session", (req, res) => {
-  const app = req.query.app;
-  const params = {
-    app,
-    joinable: true,
-    screen: {
-      // we flip width and height of the session to have a smaller element
-      // (useful to reduce the screenshot size for the visual tests)
-      width: SHARED_BROWSER_OPTIONS.viewport.height,
-      height: SHARED_BROWSER_OPTIONS.viewport.width,
-      fps: 60,
-      density: 240,
-    },
-    idle_time_min: 0,
-    app_version: undefined,
-  };
+app.post("/instance", (req, res) => {
+  const appName = req.query.appName;
   axios
-    .post(`${process.env.ASG_API_URL}/1.0/sessions`, params, {
-      headers: asgHeaders,
-      httpsAgent: asgAgent,
+    .get(`${process.env.AMS_API_URL}/1.0/applications?recursion=1`, {
+      httpsAgent: amsAgent,
     })
     .then((response) => {
-      res.send(response.data);
+      const applications = response.data.metadata;
+      const targetApp = applications.find(
+        (application) => application.name === appName,
+      );
+      if (!targetApp) {
+        res.status(404).send("Application not found");
+      } else {
+        const payload = {
+          app_id: targetApp.id,
+          app_version: -1,
+          config: {
+            display: {
+              // we flip width and height of the session to have a smaller element
+              // (useful to reduce the screenshot size for the visual tests)
+              width: SHARED_BROWSER_OPTIONS.viewport.height,
+              height: SHARED_BROWSER_OPTIONS.viewport.width,
+              fps: 60,
+              density: 240,
+            },
+            enable_streaming: true,
+            platform: "webrtc",
+          },
+          no_start: false,
+        };
+        axios
+          .post(`${process.env.AMS_API_URL}/1.0/instances`, payload, {
+            httpsAgent: amsAgent,
+          })
+          .then((response) => {
+            res.send(response.data);
+          })
+          .catch((error) => {
+            res.status(500).send(error);
+          });
+      }
     })
     .catch((error) => {
       res.status(500).send(error);

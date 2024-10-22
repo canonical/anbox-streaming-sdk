@@ -24,14 +24,17 @@ import {
 } from "./fixtures/constants.cjs";
 require("dotenv").config({ path: ".env.local" });
 
-const deleteTestSession = async (appName) => {
-  const deleteSessionResponse = await fetch(
-    `${BASE_URL}/session?name=${appName}`,
+const deleteTestInstance = async (sessionId) => {
+  if (!sessionId) {
+    return;
+  }
+  const deleteInstanceResponse = await fetch(
+    `${BASE_URL}/instance?sessionId=${sessionId}`,
     {
       method: "DELETE",
     },
   );
-  expect(deleteSessionResponse.status).toBe(200);
+  expect(deleteInstanceResponse.status).toBe(200);
 };
 
 const deleteTestApplication = async (appName) => {
@@ -45,9 +48,9 @@ const deleteTestApplication = async (appName) => {
 };
 
 async function globalTeardown() {
-  await deleteTestSession(AOSP_APP_NAME);
+  await deleteTestInstance(process.env.AOSP_SESSION_ID);
   await deleteTestApplication(AOSP_APP_NAME);
-  await deleteTestSession(AAOS_APP_NAME);
+  await deleteTestInstance(process.env.AAOS_SESSION_ID);
   await deleteTestApplication(AAOS_APP_NAME);
 }
 
