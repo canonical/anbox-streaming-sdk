@@ -25,7 +25,7 @@ import {
 require("dotenv").config({ path: ".env.local" });
 
 const APP_RETRY_LIMIT = 300;
-const SESSION_RETRY_LIMIT = 100;
+const INSTANCE_RETRY_LIMIT = 100;
 const ANDROID_BOOT_DELAY = 20_000;
 
 const isTestAppAvailable = async (appName) => {
@@ -34,25 +34,32 @@ const isTestAppAvailable = async (appName) => {
   return applications.find((application) => application.name === appName);
 };
 
-const hasTestSession = async (appName) => {
-  const response = await fetch(`${BASE_URL}/sessions`);
-  const sessions = await response.json();
-  return sessions.find((session) => session.app === appName);
+const hasTestInstance = async (appName) => {
+  const response = await fetch(`${BASE_URL}/instances`);
+  const instances = await response.json();
+  return instances.find((instance) => instance.app_name === appName);
 };
 
-const hasActiveTestSession = async (appName) => {
-  const response = await fetch(`${BASE_URL}/sessions`);
-  const sessions = await response.json();
-  const session = sessions.find(
-    (session) => session.app === appName && session.status === "active",
+const getRunningSessionId = async (appName) => {
+  const response = await fetch(`${BASE_URL}/instances`);
+  const instances = await response.json();
+  const instance = instances.find(
+    (instance) =>
+      instance.app_name === appName &&
+      instance.status === "running" &&
+      instance.tags.some((tag) => tag.startsWith("session=")),
   );
-  return session ? session.id : false;
+  return instance
+    ? instance.tags
+        .find((tag) => tag.startsWith("session="))
+        .split("session=")[1]
+    : false;
 };
 
-const waitForSessionActive = async (page, appName) => {
+const waitForInstanceRunning = async (page, appName) => {
   let retryCount = 0;
-  while (retryCount < SESSION_RETRY_LIMIT) {
-    const sessionId = await hasActiveTestSession(appName);
+  while (retryCount < INSTANCE_RETRY_LIMIT) {
+    const sessionId = await getRunningSessionId(appName);
     if (sessionId) return sessionId;
     await page.waitForTimeout(3_000);
     retryCount++;
@@ -60,9 +67,9 @@ const waitForSessionActive = async (page, appName) => {
   return false;
 };
 
-const createTestSession = async (appName) => {
+const createTestInstance = async (appName) => {
   const createSessionResponse = await fetch(
-    `${BASE_URL}/session?app=${appName}`,
+    `${BASE_URL}/instance?appName=${appName}`,
     {
       method: "POST",
     },
@@ -128,13 +135,15 @@ const setupSessionFor = async (page, appName) => {
   if (!isAppReady) {
     throw new Error("Application did not become ready");
   }
-  const hasSession = await hasTestSession(appName);
-  if (!hasSession) {
-    await createTestSession(appName);
+  const hasInstance = await hasTestInstance(appName);
+  if (!hasInstance) {
+    await createTestInstance(appName);
   }
-  const sessionId = await waitForSessionActive(page, appName);
+  const sessionId = await waitForInstanceRunning(page, appName);
   if (!sessionId) {
-    throw new Error("Session did not become active");
+    throw new Error(
+      `No running instance for the target test application: ${appName}`,
+    );
   }
   // wait a few more seconds to let Android boot up
   await page.waitForTimeout(ANDROID_BOOT_DELAY);
