@@ -91,6 +91,7 @@ const getValueObject = (prop) => {
 };
 
 const checkLengthErrors = (getOrSetArray) => {
+  console.log('getOrSetArray:', getOrSetArray);
   expect(getOrSetArray.length).toBe(TARGET_VHAL_PROPS.length);
   expect(getOrSetArray.some((getOrSetResult) => getOrSetResult.error)).toBe(
     false,
