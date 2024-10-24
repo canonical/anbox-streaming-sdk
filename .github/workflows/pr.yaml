@@ -32,7 +32,7 @@ jobs:
         ./scripts/run-tests.sh
 
     - name: Collect artifacts
-      uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
       with:
         name: anbox-streaming-sdk_${{ steps.get-version.outputs.version }}
         if-no-files-found: error
@@ -118,7 +118,7 @@ jobs:
           fi
         done
 
-    - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+    - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
       if: always()
       with:
         name: test-data-${{ steps.datetime.outputs.datetime }}
