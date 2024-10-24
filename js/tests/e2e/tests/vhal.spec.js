@@ -21,10 +21,15 @@ import { joinSession, disconnectStream } from "./shared";
 
 const VALUES = {
   287310858: { expected: 0, target: 1 }, // ABS_ACTIVE
-  289475073: { expected: "6,0", target: "6,1" }, // AP_POWER_STATE_REPORT
   289409539: { expected: 82, target: 100 }, // DISPLAY_BRIGHTNESS
   291504900: { expected: 101, target: 101.5 }, // ENGINE_OIL_TEMP
   286261505: { expected: "Toy Vehicle", target: "Foo Bar" }, // INFO_MAKE
+  290521862: {
+    expected: "0,100000,200000,300000,400000",
+    target: "0,100001,200001,300001,400001",
+  }, // WHEEL_TICK
+  // FIXME: AP_POWER_STATE_REPORT is temporarily disabled due to a bug in the image
+  //289475073: { expected: "6,0", target: "6,1" }, // AP_POWER_STATE_REPORT
 };
 
 const TARGET_VHAL_PROPS = Object.keys(VALUES).map((id) => +id);
@@ -77,6 +82,10 @@ const getValueObject = (prop) => {
     return {
       [prop.prop]: prop.int32_values,
     };
+  } else if (Object.hasOwn(prop, "int64_values")) {
+    return {
+      [prop.prop]: prop.int64_values,
+    };
   } else if (Object.hasOwn(prop, "float_values")) {
     return {
       [prop.prop]: prop.float_values,
@@ -120,10 +129,12 @@ const getSetInputs = (vhalProperties) => {
 
   const setInputs = [];
   setInputs.push(getSetInput(287310858, "int32_values")); // ABS_ACTIVE
-  setInputs.push(getSetInput(289475073, "int32_values", true)); // AP_POWER_STATE_REPORT
   setInputs.push(getSetInput(289409539, "int32_values")); // DISPLAY_BRIGHTNESS
   setInputs.push(getSetInput(291504900, "float_values")); // ENGINE_OIL_TEMP
   setInputs.push(getSetInput(286261505, "string_value")); // INFO_MAKE
+  setInputs.push(getSetInput(290521862, "int64_values", true)); // WHEEL_TICK
+  // FIXME: AP_POWER_STATE_REPORT is temporarily disabled due to a bug in the image
+  //setInputs.push(getSetInput(289475073, "int32_values", true)); // AP_POWER_STATE_REPORT
 
   return setInputs;
 };
@@ -136,15 +147,19 @@ const checkChanges = (getValues, setInputs, getValuesAfterSet) => {
     JSON.stringify(getValuesAfterSet["287310858"]),
   ); // ABS_ACTIVE
   expect(JSON.stringify(setInputs[1].int32_values)).toEqual(
-    JSON.stringify(getValuesAfterSet["289475073"]),
-  ); // AP_POWER_STATE_REPORT
-  expect(JSON.stringify(setInputs[2].int32_values)).toEqual(
     JSON.stringify(getValuesAfterSet["289409539"]),
   ); // DISPLAY_BRIGHTNESS
-  expect(JSON.stringify(setInputs[3].float_values)).toEqual(
+  expect(JSON.stringify(setInputs[2].float_values)).toEqual(
     JSON.stringify(getValuesAfterSet["291504900"]),
   ); // ENGINE_OIL_TEMP
-  expect(setInputs[4].string_value).toEqual(getValuesAfterSet["286261505"]); // INFO_MAKE
+  expect(setInputs[3].string_value).toEqual(getValuesAfterSet["286261505"]); // INFO_MAKE
+  expect(JSON.stringify(setInputs[4].int64_values)).toEqual(
+    JSON.stringify(getValuesAfterSet["290521862"]),
+  ); // WHEEL_TICK
+  // FIXME: AP_POWER_STATE_REPORT is temporarily disabled due to a bug in the image
+  //expect(JSON.stringify(setInputs[5].int32_values)).toEqual(
+  //  JSON.stringify(getValuesAfterSet["289475073"]),
+  //); // AP_POWER_STATE_REPORT
 };
 
 test("VHAL methods on an AAOS session", async ({ page }) => {
