@@ -44,6 +44,8 @@ const openSearchBar = async (page) => {
 
 const typeSearch = async (page, text) => {
   await page.keyboard.type(text);
+  // Wait 1s (text input)
+  await page.waitForTimeout(1000);
   await expect(page).toHaveScreenshot("text-input.png", OPTIONS);
 };
 
