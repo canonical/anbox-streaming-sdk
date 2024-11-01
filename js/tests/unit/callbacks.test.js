@@ -218,7 +218,6 @@ test("custom message callback is called", (done) => {
       callbacks: {
         message: jest.fn((data) => {
           expect(data).toEqual("foo_text");
-          done();
         }),
         error: jest.fn((errMessage) => {
           expect(errMessage).toEqual("data channel is closed");
