@@ -17,5 +17,5 @@ flavors in the build/outputs/aar/ directory of the project.
 
 ## Integrate the AAR library into your project
 
-See the [development documentation](https://anbox-cloud.io/docs/howto/stream/client-side-keyboard)
+See the [development documentation](https://documentation.ubuntu.com/anbox-cloud/en/latest/howto/stream/integrate-virtual-keyboard/)
 for how to integrate the AAR library into your project.
