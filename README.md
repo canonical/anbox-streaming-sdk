@@ -22,7 +22,7 @@ Refer to the following examples to explore advanced usage scenarios and best pra
 
 * [Simple Android Webview Streaming](examples/android/webview_streaming) - An Android example that embeds WebView integrated with the JS SDK for video streaming.
 * [Enhanced Android Webview Streaming](examples/android/enhanced_webview_streaming) - An Android example that embeds AnboxWebView for text input handling enhancement for a hybrid application.
-* [Out of Band](examples/android/out_of_band_v2) - An Android example demonstrating the usage of [out of band data](https://anbox-cloud.io/docs/howto/stream/oob-data#oob-v2) feature which exchanges data between the Android application running in the Anbox container and a streaming client.
+* [Out of Band](examples/android/out_of_band_v2) - An Android example demonstrating the usage of [out of band data](https://documentation.ubuntu.com/anbox-cloud/en/latest/howto/stream/exchange-oob-data/#oob-v2) feature which exchanges data between the Android application running in the Anbox container and a streaming client.
 * [JavaScript-based Streaming Example](examples/js) - A web application utilizes the JS SDK for video streaming.
 
 ## Contributing

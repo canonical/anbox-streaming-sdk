@@ -152,7 +152,7 @@ test("Video container with no size specified", () => {
   expect(() => new AnboxStream(options)).not.toThrow();
   expect(console.error).toHaveBeenCalledWith(
     expect.stringContaining(
-      "AnboxStream: video container element misses size. Please see https://anbox-cloud.io/docs/howto/stream/web-client"
+      "AnboxStream: video container element misses size. Please see https://documentation.ubuntu.com/anbox-cloud/en/latest/tutorial/stream-client"
     )
   );
   global.console.error.mockRestore();

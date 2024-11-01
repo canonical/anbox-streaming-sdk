@@ -1,6 +1,6 @@
 # Anbox Cloud - Out of Band Data v2
 
-An Android application that demonstrates how to use [out of band data v2](https://anbox-cloud.io/docs/howto/stream/oob-data#oob-v2)
+An Android application that demonstrates how to use [out of band data v2](https://documentation.ubuntu.com/anbox-cloud/en/latest/howto/stream/exchange-oob-data/#oob-v2)
 to exchange data between an Android application and a WebRTC client.
 
 **Note:** to install the app as a system app in the Android container,
