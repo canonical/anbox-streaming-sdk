@@ -3,7 +3,8 @@
   "version": "1.13.0",
   "description": "unit testing for anbox stream sdk (JS only)",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "test:coverage": "jest --coverage --coverageDirectory=coverage --coverageProvider=v8"
   },
   "author": "indore-team@launchpad.net",
   "license": "Proprietary",
