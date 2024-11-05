@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-import { expect } from "@playwright/test";
+import { expect } from "./fixtures/anbox-test";
 import {
   AOSP_APP_NAME,
   AAOS_APP_NAME,

@@ -4,6 +4,7 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 .cache/
+coverage/
 
 .env.local
 anbox-cloud.crt

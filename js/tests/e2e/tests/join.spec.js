@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-import { test } from "@playwright/test";
+import { test } from "../fixtures/anbox-test";
 import { joinSession, disconnectStream } from "./shared";
 
 test("join session and disconnect stream", async ({ page }) => {
