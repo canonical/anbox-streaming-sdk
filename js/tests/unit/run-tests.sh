@@ -59,4 +59,4 @@ docker run --rm \
   bash -c "cd /anbox-streaming-sdk-unit-test && \
               npm install --include=dev && \
               ./node_modules/.bin/eslint $ESLINT_ARGS *.js && \
-              npm test"
+              npm run test:coverage"
