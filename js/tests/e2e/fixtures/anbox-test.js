@@ -16,21 +16,23 @@
  * limitations under the License.
  */
 
-import { expect } from "../fixtures/anbox-test";
+import { test as base } from "@playwright/test";
+import { finishCoverage, startCoverage } from "./coverage.js";
 
-export const joinSession = async (page, sessionId) => {
-  await page.goto(`/?sessionId=${sessionId}`);
+export const test = base.extend({
+  runCoverage: [
+    async ({ page, browserName }, use) => {
+      const supportsCoverage = browserName === "chromium";
+      if (supportsCoverage) {
+        await startCoverage(page);
+      }
+      await use(page);
+      if (supportsCoverage) {
+        await finishCoverage(page);
+      }
+    },
+    { auto: true },
+  ],
+});
 
-  await expect(page.locator("#anbox-stream").locator("video")).toHaveCount(1);
-  await expect(page.locator("#anbox-stream").locator("audio")).toHaveCount(1);
-  await page.waitForFunction(() => globalThis.isReady !== undefined, null, {
-    timeout: 20_000,
-  });
-};
-
-export const disconnectStream = async (page) => {
-  await page.evaluate(() => globalThis.stream.disconnect());
-  await page.waitForFunction(() => globalThis.isClosed !== undefined, null, {
-    timeout: 20_000,
-  });
-};
+export const expect = test.expect;
