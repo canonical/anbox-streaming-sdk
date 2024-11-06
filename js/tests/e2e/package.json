@@ -4,7 +4,8 @@
   "description": "e2e tests for anbox stream sdk",
   "scripts": {
     "start": "node server.js",
-    "test:coverage": "rm -rf coverage ;  PW_TEST_HTML_REPORT_OPEN='never' npx playwright test"
+    "test:coverage": "rm -rf coverage ; PW_TEST_HTML_REPORT_OPEN='never' npx playwright test",
+    "test-report-coverage": "cp ../unit/coverage/coverage-final.json coverage/ && sed -i 's|\/anbox-streaming-sdk-unit-test\/||g' coverage/coverage-final.json && cd ../.. && BASE_PATH=$(pwd) && sed -i \"s|anbox-stream-sdk.js|$BASE_PATH\/anbox-stream-sdk.js|g\" tests/e2e/coverage/*.json && nyc report --reporter html --reporter cobertura --reporter text-summary --temp-dir $BASE_PATH/tests/e2e/coverage --report-dir $BASE_PATH/tests/e2e/coverage/combined-report/js ; mv tests/e2e/coverage/combined-report/js/cobertura-coverage.xml tests/e2e/coverage/combined-report/cobertura-coverage-js.xml"
   },
   "author": "indore-team@launchpad.net",
   "license": "Proprietary",
@@ -18,6 +19,7 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.1.3",
     "globals": "^15.3.0",
+    "nyc": "^17.1.0",
     "prettier": "^3.2.5",
     "v8-to-istanbul": "^9.3.0"
   },
