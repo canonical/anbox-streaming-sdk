@@ -25,6 +25,38 @@ Refer to the following examples to explore advanced usage scenarios and best pra
 * [Out of Band](examples/android/out_of_band_v2) - An Android example demonstrating the usage of [out of band data](https://documentation.ubuntu.com/anbox-cloud/en/latest/howto/stream/exchange-oob-data/#oob-v2) feature which exchanges data between the Android application running in the Anbox container and a streaming client.
 * [JavaScript-based Streaming Example](examples/js) - A web application utilizes the JS SDK for video streaming.
 
+## Testing
+
+The JS SDK library comes with two test suites: one for unit tests and another for end-to-end tests. Unit tests use [Jest](https://jestjs.io), and end-to-end tests use [Playwright](https://playwright.dev).
+
+- Unit tests are located in `js/tests/unit`.
+- End-to-end tests are located in `js/tests/e2e`.
+
+Both these folders contain a `run-tests.sh` script, which runs the tests inside a Docker container. Check how to install Docker [here](https://docs.docker.com/engine/install/).
+
+If you want to run end-to-end tests, you need an Anbox Cloud deployment. The easiest way to set up one is by using the [Anbox Cloud Appliance](https://documentation.ubuntu.com/anbox-cloud/en/latest/tutorial/installing-appliance/).
+
+Once the appliance is ready, follow these steps to run the end-to-end tests:
+
+- In the `js/tests/e2e` folder, create a `.env.local` file.
+- Add the following environment variables in the `.env.local` file:
+  - `ASG_API_TOKEN=my-asg-api-token`
+    Token to access the stream gateway API. See reference [here](https://documentation.ubuntu.com/anbox-cloud/en/latest/howto/stream/access-stream-gateway/#creating-a-token).
+  - `AMS_API_CERTIFICATE=./path-to-ams-cert.crt`
+    A certificate that is trusted by AMS. See reference [here](https://documentation.ubuntu.com/anbox-cloud/en/latest/howto/anbox/control-ams-remotely/#install-a-trusted-certificate).
+  - `AMS_API_CERTIFICATE_KEY=./path-to-ams-cert.key`
+    The key for the certificate above.
+  - `AMS_API_URL=https://my-ams-url:8444`
+    URL (including port) of the AMS back-end.
+  - `ASG_API_URL=https://my-asg-url:9031`
+    URL (including port) of the ASG back-end.
+- Run the `run-tests.sh` script in the `js/tests/e2e` folder.
+
+When you run tests with the `run-tests.sh` script, coverage data will be generated in the following folders:
+
+- `js/tests/unit/coverage` for unit tests.
+- `js/tests/e2e/coverage` for end-to-end tests.
+
 ## Contributing
 
 We welcome contributions from the community to enhance the Anbox Streaming SDK. To contribute, please follow these guidelines:
