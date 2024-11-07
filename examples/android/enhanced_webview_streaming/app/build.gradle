@@ -3,7 +3,6 @@ apply plugin: 'com.android.application'
 android {
     namespace "com.canonical.anbox.streaming_sdk.enhanced_webview_example"
     compileSdkVersion 30
-    buildToolsVersion "30.0.0"
 
     defaultConfig {
         applicationId "com.canonical.anbox.streaming_sdk.enhanced_webview_example"
