@@ -66,22 +66,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ANDROID_HOME=/usr/local/android-sdk
 
 RUN apt update -qq && apt install -qq -y \
-		build-essential \
-		cmake \
-		cmake-extras \
-		doxygen \
 		sudo \
-		mesa-common-dev \
-		libegl1-mesa-dev \
-		libgles2-mesa \
-		libgles2-mesa-dev \
-		pkg-config \
-		libsoup2.4-dev \
-		libgtest-dev \
-		ninja-build \
-		libsdl2-dev \
-		libgtest-dev \
-		google-mock \
 		wget \
 		unzip \
 		zip \
