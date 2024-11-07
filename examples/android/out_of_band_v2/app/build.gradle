@@ -3,6 +3,7 @@ plugins {
 }
 
 android {
+    namespace "com.canonical.anboxcloud.outofbandappv2"
     compileSdkVersion 30
     buildToolsVersion "30.0.0"
 

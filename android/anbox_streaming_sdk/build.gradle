@@ -12,13 +12,13 @@ allprojects {
     repositories {
         google()
         jcenter()
-        
     }
 }
 
 apply plugin: 'com.android.library'
 
 android {
+    namespace 'com.canonical.anbox.streaming_sdk'
     compileSdkVersion 30
     buildToolsVersion "30.0.0"
 

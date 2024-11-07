@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-DOCKER_IMAGE_NAME=anbox-stream-sdk-native-example
+DOCKER_IMAGE_NAME=anbox-stream-sdk
 DOCKER_IMAGE_TAG=latest
 UBUNTU_VERSION=24.04
 BASE_DOCKER_IMAGE="ubuntu:$UBUNTU_VERSION"
