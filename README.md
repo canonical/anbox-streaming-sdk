@@ -57,6 +57,11 @@ When you run tests with the `run-tests.sh` script, coverage data will be generat
 - `js/tests/unit/coverage` for unit tests.
 - `js/tests/e2e/coverage` for end-to-end tests.
 
+To combine the coverage of the unit tests with that of the end-to-end tests, and generate a report using [nyc](https://github.com/istanbuljs/nyc), you can run the `test-report-coverage` script:
+
+- First, execute the `run-tests.sh` scripts in both the `js/tests/unit` and the `js/tests/e2e` folders. This will run the tests, and produce coverage data for both suites.
+- In the `js/tests/e2e` folder, execute `npm run test-report-coverage`. The report will be stored in the `js/tests/e2e/coverage/combined-report` folder.
+
 ## Contributing
 
 We welcome contributions from the community to enhance the Anbox Streaming SDK. To contribute, please follow these guidelines:
