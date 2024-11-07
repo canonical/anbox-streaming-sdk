@@ -6,6 +6,7 @@
     "schedule:earlyMondays",
     ":combinePatchMinorReleases",
     ":ignoreUnstable",
-    "helpers:pinGitHubActionDigests"
+    "helpers:pinGitHubActionDigests",
+    "group:allNonMajor"
   ]
 }
