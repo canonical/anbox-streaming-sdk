@@ -16,7 +16,7 @@
 
 DOCKER_IMAGE_NAME=anbox-stream-sdk-native-example
 DOCKER_IMAGE_TAG=latest
-UBUNTU_VERSION=18.04
+UBUNTU_VERSION=24.04
 BASE_DOCKER_IMAGE="ubuntu:$UBUNTU_VERSION"
 ANDROID_NDK_VERSION=21.0.6113669
 ANDROID_HOME=/usr/local/android-sdk
@@ -95,7 +95,7 @@ RUN mkdir /work && chown jenkins:jenkins /work
 RUN mkdir /home/jenkins && chown -R jenkins:jenkins /home/jenkins
 
 RUN apt install -qq -y \
-		openjdk-8-jre \
+		openjdk-17-jdk-headless \
 		gradle
 
 # Download Android SDK
