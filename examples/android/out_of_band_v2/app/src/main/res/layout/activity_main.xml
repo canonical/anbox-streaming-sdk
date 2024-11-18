@@ -45,6 +45,8 @@
         android:id="@+id/textReceived"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:gravity="bottom"
+        android:scrollbars = "vertical"
         android:hint="@string/received_data_hint"
         app:layout_constraintBottom_toTopOf="@+id/textToSend"
         app:layout_constraintEnd_toEndOf="parent"
