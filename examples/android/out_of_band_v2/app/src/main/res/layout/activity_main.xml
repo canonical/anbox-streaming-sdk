@@ -6,41 +6,14 @@
     android:layout_height="match_parent"
     tools:context=".DataChannelActivity">
 
-    <EditText
-        android:id="@+id/textToSend"
-        android:layout_width="409dp"
-        android:layout_height="242dp"
-        android:inputType="text"
-        android:importantForAutofill="no"
-        android:hint="@string/send_data_hint"
-        app:layout_constraintBottom_toTopOf="@+id/button"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.5"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/textReceived" />
+    <!-- Guideline for 80% of the screen height (for content area) -->
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/guideline"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        app:layout_constraintGuide_percent="0.8" />
 
-    <Button
-        android:id="@+id/button"
-        android:layout_width="409dp"
-        android:layout_height="75dp"
-        android:text="@string/send_button"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.5"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/textToSend" />
-
-    <TextView
-        android:id="@+id/textReceived"
-        android:layout_width="409dp"
-        android:layout_height="242dp"
-        android:hint="@string/received_data_hint"
-        app:layout_constraintBottom_toTopOf="@+id/textToSend"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.5"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/connectBtn" />
-
+    <!-- EditText for channel name, always at the top -->
     <EditText
         android:id="@+id/channelName"
         android:layout_width="0dp"
@@ -49,28 +22,60 @@
         android:layout_marginRight="20dp"
         android:ems="10"
         android:hint="@string/channel_name_hint"
-        android:inputType="textPersonName"
         android:importantForAutofill="no"
-        app:layout_constraintBottom_toTopOf="@+id/textReceived"
+        android:inputType="textPersonName"
         app:layout_constraintEnd_toStartOf="@+id/connectBtn"
         app:layout_constraintHorizontal_bias="0.5"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+    <!-- Button for connecting, aligned to the top right next to channel name -->
     <Button
         android:id="@+id/connectBtn"
         android:layout_width="120dp"
         android:layout_height="wrap_content"
         android:text="@string/connect_button"
-        app:layout_constraintBottom_toTopOf="@+id/textReceived"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintHorizontal_bias="0.5"
         app:layout_constraintStart_toEndOf="@+id/channelName"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <androidx.constraintlayout.widget.Group
-        android:id="@+id/group"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content" />
+    <!-- TextView to display received data, with flexible height based on content -->
+    <TextView
+        android:id="@+id/textReceived"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:hint="@string/received_data_hint"
+        app:layout_constraintBottom_toTopOf="@+id/textToSend"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.5"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/connectBtn" />
+
+    <!-- EditText for sending data, with flexible height based on content -->
+    <EditText
+        android:id="@+id/textToSend"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:hint="@string/send_data_hint"
+        android:importantForAutofill="no"
+        android:inputType="text"
+        app:layout_constraintBottom_toTopOf="@+id/button"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.5"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/textReceived" />
+
+    <!-- Send Button fixed at the bottom of the screen -->
+    <Button
+        android:id="@+id/button"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="@string/send_button"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.5"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/textToSend" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
