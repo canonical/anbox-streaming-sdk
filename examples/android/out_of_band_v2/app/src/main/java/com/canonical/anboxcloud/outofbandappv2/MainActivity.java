@@ -21,11 +21,7 @@ package com.canonical.anboxcloud.outofbandappv2;
 import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
 
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.net.ConnectivityManager;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
@@ -33,6 +29,7 @@ import android.os.IBinder;
 import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
+import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
 import android.widget.Button;
 import android.widget.TextView;
@@ -63,6 +60,10 @@ public class MainActivity extends AppCompatActivity implements DataReadTask.Data
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        // auto scroll down to display the received text
+        TextView receivedText = findViewById(R.id.textReceived);
+        receivedText.setMovementMethod(new ScrollingMovementMethod());
 
         Button sendBtn = findViewById(R.id.button);
         sendBtn.setOnClickListener(v -> {
@@ -186,7 +187,7 @@ public class MainActivity extends AppCompatActivity implements DataReadTask.Data
     public void onDataRead(byte[] readBytes) {
         String text = new String(readBytes);
         TextView textView = findViewById(R.id.textReceived);
-        textView.setText(textView.getText() + "\n"+ text);
+        textView.append("\n" + text);
         Log.i(TAG, "channel: "  + mConnectedChannel + " data: "  + text);
     }
 
