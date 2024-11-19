@@ -74,7 +74,7 @@ public class MainActivity extends AppCompatActivity implements DataReadTask.Data
 
             TextView textSend = findViewById(R.id.textToSend);
             String text = textSend.getText().toString();
-            if (text.length() == 0)
+            if (text.isEmpty())
                 return;
 
             sendData(text);
@@ -84,7 +84,7 @@ public class MainActivity extends AppCompatActivity implements DataReadTask.Data
         connectBtn.setOnClickListener(v -> {
             TextView channel = findViewById(R.id.channelName);
             String channelName = channel.getText().toString().trim();
-            if (channelName.length() == 0) {
+            if (channelName.isEmpty()) {
                 Toast.makeText(getApplicationContext(), "Channel name must no be empty", Toast.LENGTH_LONG).show();
                 return;
             }
@@ -116,9 +116,9 @@ public class MainActivity extends AppCompatActivity implements DataReadTask.Data
             String data = intent.getStringExtra("data");
 
             // Connect data channel and send data on demand
-            if (channelName != null && channelName.length() != 0) {
+            if (channelName != null && !channelName.isEmpty()) {
                 readDataFromChannel(channelName);
-                if (data != null && data.length() != 0) {
+                if (data != null && !data.isEmpty()) {
                     sendData(data);
                 }
             }
@@ -192,8 +192,8 @@ public class MainActivity extends AppCompatActivity implements DataReadTask.Data
     }
 
     void sendData(String text) {
-        OutputStream ostream = new FileOutputStream(mFd.getFileDescriptor());
         try {
+            OutputStream ostream = new FileOutputStream(mFd.getFileDescriptor());
             ostream.write(text.getBytes(), 0, text.length());
         } catch (IOException ex) {
             Log.i(TAG, "Failed to write data: " + ex.getMessage());

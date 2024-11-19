@@ -37,7 +37,7 @@ public class DataReadTask extends AsyncTask<Void, Void, Void> {
     private static final String TAG = "DataReadTask";
 
     private final ParcelFileDescriptor mFd;
-    private DataReadListener mListener;
+    private final DataReadListener mListener;
 
     public interface DataReadListener {
         void onDataRead(byte[] readBytes);
@@ -72,34 +72,34 @@ public class DataReadTask extends AsyncTask<Void, Void, Void> {
               Log.e(TAG, "Failed to read data: " + ex);
         }
 
-      return null;
-  }
+        return null;
+    }
 
-  @Override
-  protected void onCancelled() {
+    @Override
+    protected void onCancelled() {
       onPostExecute(null);
   }
 
-  public void terminate() {
-      cancel(true);
-      // Interrupt the InputStream.read and causes thread
-      // exit properly without hanging at the block operation.
-      closeQuietly();
-  }
+    public void terminate() {
+        cancel(true);
+        // Interrupt the InputStream.read and causes thread
+        // exit properly without hanging at the block operation.
+        closeQuietly();
+    }
 
     @Override
-  protected void onPostExecute(Void v) {
-      super.onPostExecute(v);
-      closeQuietly();
-  }
+    protected void onPostExecute(Void v) {
+        super.onPostExecute(v);
+        closeQuietly();
+    }
 
-  private void closeQuietly() {
-      if (mFd != null) {
-          try {
+    private void closeQuietly() {
+        if (mFd != null) {
+            try {
               mFd.close();
-          } catch (Exception ex) {
+            } catch (Exception ex) {
               Log.e(TAG, "Error closing " + mFd, ex);
-          }
-      }
-  }
+            }
+        }
+    }
 }
