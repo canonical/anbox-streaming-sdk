@@ -1,0 +1,118 @@
+name: Run code quality scan
+on:
+  workflow_dispatch:
+  # FIXME put on hold until infrastructure limits are sorted. Until
+  # then we only run weekly on Sundays.
+  # push:
+  #   branches:
+  #     - main
+  schedule:
+  # Run every Sunday on 8am
+  - cron: "0 8 * * 0"
+
+
+concurrency:
+  group: tics
+  cancel-in-progress: false
+
+jobs:
+  tics-scan:
+    name: Run TICS quality scan
+    if: ${{ github.repository_owner == 'canonical' }}
+    runs-on: [self-hosted, linux, X64, noble, large]
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+    - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+    - uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4
+      with:
+        node-version: 20
+
+    - name: Determine test configuration
+      id: config
+      run: |
+        echo "base_version=$(cat .base_version)" >> "$GITHUB_OUTPUT"
+
+    - name: Setup Anbox Cloud
+      uses: canonical/anbox-cloud-github-action@ef27ae90bda26fcdb2d33cddcb527ec32f3adc6e
+      with:
+        channel: ${{ steps.config.outputs.base_version }}/edge
+
+    - name: Tune installation
+      run: |
+        amc config set container.security_updates false
+
+    - name: Restore cached images
+      uses: actions/cache/restore@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4
+      with:
+        path: images
+        key: anbox-images-amd64
+        restore-keys: |
+          anbox-images-amd64-
+
+    - name: Import cached images
+      run: |
+        for name in android13 aaos13 ; do
+          amc image add jammy:"$name":amd64 "$GITHUB_WORKSPACE"/images/"$name"_amd64.tar.xz
+        done
+
+    - name: Register trust certificate with AMS
+      working-directory: js/tests/e2e
+      run: |
+        openssl req -x509 -newkey rsa:4096 -keyout anbox-cloud.key \
+          -out anbox-cloud.crt -days 365 -nodes \
+          -subj "/C=GB/ST=London/L=London/O=Global Security/OU=IT Department/CN=example.com"
+        amc config trust add ./anbox-cloud.crt
+
+    - name: Configure env variables
+      working-directory: js/tests/e2e
+      run: |
+        echo "CI=true" > .env.local
+        echo "AMS_API_CERTIFICATE=anbox-cloud.crt" >> .env.local
+        echo "AMS_API_CERTIFICATE_KEY=anbox-cloud.key" >> .env.local
+        echo "AMS_API_URL=$(sudo cat /var/snap/anbox-cloud-appliance/common/dashboard/config.yaml | grep AMS_API_URL | cut -d ' ' -f2)" >> .env.local
+        echo "ASG_API_URL=$(sudo cat /var/snap/anbox-cloud-appliance/common/dashboard/config.yaml | grep ASG_API_URL | cut -d ' ' -f2)" >> .env.local
+        echo "ASG_API_TOKEN=$(sudo cat /var/snap/anbox-cloud-appliance/common/dashboard/config.yaml | grep ASG_API_TOKEN | cut -d ' ' -f2)" >> .env.local
+
+    - name: Run tests, generate coverage report
+      working-directory: js/tests
+      run: |
+        ./combined-coverage-report.sh
+
+    - name: Dump logs on failure
+      if: failure()
+      run: |
+        sudo snap logs -n all anbox-cloud-appliance > appliance.log
+        sudo anbox-cloud-appliance.buginfo > appliance.buginfo
+        for id in $(amc ls --format=csv | cut -d',' -f1) ; do
+          status=$(amc show "$id" --format=json | jq -r .status)
+          if [ "$status" = error ] ; then
+            for log in $(amc show "$id" --format=json | jq -r '.stored_logs[]' | xargs) ; do
+              amc show-log "$id" "$log" |& tee -a "$id"_"$log"
+            done
+          elif [ "$status" = started ] || [ "$status" = running ]; then
+            for name in android anbox ; do
+              timeout 30s amc logs "$id" -t "$name" |& tee -a "$id"_"$name".log
+            done
+          fi
+        done
+
+    - name: Upload test results and coverage data
+      if: always()
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
+      with:
+        name: tics-test-reports
+        path: |
+          js/tests/e2e/test-results
+          js/tests/e2e/coverage
+        # Keep for a bit longer to allow investigation on older workflow runs
+        retention-days: 7
+
+    - name: Run TICS scan
+      uses: tiobe/tics-github-action@03294702eb0a8e13c06ff1949c7bb6643b4c60fc # v3
+      with:
+        mode: qserver
+        project: anbox-streaming-sdk
+        viewerUrl: https://canonical.tiobe.com/tiobeweb/TICS/api/cfg?name=default
+        ticsAuthToken: ${{ secrets.TICS_AUTH_TOKEN }}
+        installTics: true
