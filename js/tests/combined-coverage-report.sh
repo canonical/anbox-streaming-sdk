@@ -14,13 +14,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ANBOX_STREAMING_SDK_DIR="$PWD/../../"
-
-docker run --rm \
-  -v "$ANBOX_STREAMING_SDK_DIR:/anbox-streaming-sdk-js" \
-  node:20 \
-  bash -c "cd /anbox-streaming-sdk-js/tests/e2e && \
-           npm ci && \
-           npx playwright install --with-deps && \
-           npm run test:coverage && \
-           chown -R $(id -u ${USER}):$(id -g ${USER}) coverage"
+cd unit && sh run-tests.sh && cd ../e2e && sh run-tests.sh && mkdir -p coverage/combined-report && npm run test-report-coverage
