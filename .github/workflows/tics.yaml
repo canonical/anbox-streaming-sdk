@@ -18,10 +18,7 @@ concurrency:
 jobs:
   tics-scan:
     name: Run TICS quality scan
-    if: ${{ github.repository_owner == 'canonical' }}
-    runs-on: [self-hosted, linux, X64, noble, large]
-    env:
-      DEBIAN_FRONTEND: noninteractive
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
     - uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4
