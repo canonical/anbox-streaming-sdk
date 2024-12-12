@@ -41,7 +41,7 @@ const hasTestInstance = async (appName) => {
   return instances.find((instance) => instance.app_name === appName);
 };
 
-const getRunningSessionId = async (appName) => {
+const getRunningInstance = async (appName) => {
   const response = await fetch(`${BASE_URL}/instances`);
   const instances = await response.json();
   const instance = instances.find(
@@ -50,32 +50,41 @@ const getRunningSessionId = async (appName) => {
       instance.status === "running" &&
       instance.tags.some((tag) => tag.startsWith("session=")),
   );
-  return instance
-    ? instance.tags
-        .find((tag) => tag.startsWith("session="))
-        .split("session=")[1]
-    : false;
+  return instance;
 };
 
 const waitForInstanceRunning = async (page, appName) => {
   let retryCount = 0;
   while (retryCount < INSTANCE_RETRY_LIMIT) {
-    const sessionId = await getRunningSessionId(appName);
-    if (sessionId) return sessionId;
+    const instance = await getRunningInstance(appName);
+    if (instance) return instance;
     await page.waitForTimeout(3_000);
     retryCount++;
   }
   return false;
 };
 
+const setSessionOffline = async (instanceId) => {
+  const command =
+    "anbox-shell ip link set wlan0 down && anbox-shell ip link set eth0 down";
+  const execCommandResponse = await fetch(`${BASE_URL}/execCommand`, {
+    method: "POST",
+    body: JSON.stringify({ instanceId, command }),
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+  expect(execCommandResponse.status).toBe(200);
+};
+
 const createTestInstance = async (appName) => {
-  const createSessionResponse = await fetch(
+  const createInstanceResponse = await fetch(
     `${BASE_URL}/instance?appName=${appName}`,
     {
       method: "POST",
     },
   );
-  expect(createSessionResponse.status).toBe(200);
+  expect(createInstanceResponse.status).toBe(200);
 };
 
 const hasTestApplication = async (appName) => {
@@ -140,12 +149,17 @@ const setupSessionFor = async (page, appName) => {
   if (!hasInstance) {
     await createTestInstance(appName);
   }
-  const sessionId = await waitForInstanceRunning(page, appName);
-  if (!sessionId) {
+  const instance = await waitForInstanceRunning(page, appName);
+  if (!instance) {
     throw new Error(
       `No running instance for the target test application: ${appName}`,
     );
   }
+  const instanceId = instance.id;
+  await setSessionOffline(instanceId);
+  const sessionId = instance.tags
+    .find((tag) => tag.startsWith("session="))
+    .split("session=")[1];
   // wait a few more seconds to let Android boot up
   await page.waitForTimeout(ANDROID_BOOT_DELAY);
   return sessionId;
