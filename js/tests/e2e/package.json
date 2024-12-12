@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node server.js",
     "test:coverage": "rm -rf coverage ; PW_TEST_HTML_REPORT_OPEN='never' npx playwright test",
-    "test-report-coverage": "cp ../unit/coverage/coverage-final.json coverage/ && sed -i 's|\/anbox-streaming-sdk-unit-test\/||g' coverage/coverage-final.json && cd ../.. && BASE_PATH=$(pwd) && sed -i \"s|anbox-stream-sdk.js|$BASE_PATH\/anbox-stream-sdk.js|g\" tests/e2e/coverage/*.json && nyc report --reporter html --reporter cobertura --reporter text-summary --temp-dir $BASE_PATH/tests/e2e/coverage --report-dir $BASE_PATH/tests/e2e/coverage/combined-report/js ; mv tests/e2e/coverage/combined-report/js/cobertura-coverage.xml tests/e2e/coverage/combined-report/cobertura-coverage-js.xml"
+    "test-report-coverage": "cp ../unit/coverage/coverage-final.json coverage/ && sed -i 's|/anbox-streaming-sdk-unit-test/||g' coverage/coverage-final.json && cd ../.. && BASE_PATH=$(pwd) && sed -i \"s|anbox-stream-sdk.js|$BASE_PATH/anbox-stream-sdk.js|g\" tests/e2e/coverage/*.json && nyc report --reporter html --reporter cobertura --reporter text-summary --temp-dir $BASE_PATH/tests/e2e/coverage --report-dir $BASE_PATH/tests/e2e/coverage/combined-report/js ; mv tests/e2e/coverage/combined-report/js/cobertura-coverage.xml tests/e2e/coverage/combined-report/cobertura-coverage-js.xml"
   },
   "author": "indore-team@launchpad.net",
   "license": "Proprietary",
