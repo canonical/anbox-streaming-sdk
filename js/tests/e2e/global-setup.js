@@ -64,19 +64,6 @@ const waitForInstanceRunning = async (page, appName) => {
   return false;
 };
 
-const setSessionOffline = async (instanceId) => {
-  const command =
-    "anbox-shell ip link set wlan0 down && anbox-shell ip link set eth0 down";
-  const execCommandResponse = await fetch(`${BASE_URL}/execCommand`, {
-    method: "POST",
-    body: JSON.stringify({ instanceId, command }),
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-  expect(execCommandResponse.status).toBe(200);
-};
-
 const createTestInstance = async (appName) => {
   const createInstanceResponse = await fetch(
     `${BASE_URL}/instance?appName=${appName}`,
@@ -155,8 +142,6 @@ const setupSessionFor = async (page, appName) => {
       `No running instance for the target test application: ${appName}`,
     );
   }
-  const instanceId = instance.id;
-  await setSessionOffline(instanceId);
   const sessionId = instance.tags
     .find((tag) => tag.startsWith("session="))
     .split("session=")[1];

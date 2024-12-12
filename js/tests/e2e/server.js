@@ -32,7 +32,6 @@ const {
 } = require("./fixtures/constants.cjs");
 
 const app = express();
-app.use(express.json());
 app.listen(SERVER_PORT);
 
 const amsAgent = new https.Agent({
@@ -272,31 +271,6 @@ app.post("/join", (req, res) => {
       {
         headers: asgHeaders,
         httpsAgent: asgAgent,
-      },
-    )
-    .then((response) => {
-      res.send(response.data);
-    })
-    .catch((error) => {
-      res.status(500).send(error);
-    });
-});
-
-app.post("/execCommand", (req, res) => {
-  const instanceId = req.body.instanceId;
-  const command = req.body.command;
-  const payload = {
-    command: [command],
-    height: 0,
-    interactive: true,
-    width: 0,
-  };
-  axios
-    .post(
-      `${process.env.AMS_API_URL}/1.0/instances/${instanceId}/exec`,
-      payload,
-      {
-        httpsAgent: amsAgent,
       },
     )
     .then((response) => {
