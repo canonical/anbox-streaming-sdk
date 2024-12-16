@@ -31,7 +31,7 @@ jobs:
         echo "base_version=$(cat .base_version)" >> "$GITHUB_OUTPUT"
 
     - name: Setup Anbox Cloud
-      uses: canonical/anbox-cloud-github-action@ef27ae90bda26fcdb2d33cddcb527ec32f3adc6e
+      uses: canonical/anbox-cloud-github-action@a452c19155b194c53c0afa3bbe3057525ea17eee
       with:
         channel: ${{ steps.config.outputs.base_version }}/edge
 
