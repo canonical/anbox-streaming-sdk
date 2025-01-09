@@ -63,7 +63,7 @@ beforeEach(() => {
   global.navigator.__defineGetter__(
     "userAgent",
     () =>
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36"
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36",
   );
 });
 
@@ -263,12 +263,12 @@ test("custom message callback is called", (done) => {
   // For `bar` data channel
   chans[1].onopen();
   expect(sdkOptions.dataChannels["bar"].callbacks.open).toHaveBeenCalledTimes(
-    1
+    1,
   );
 
   chans[1].onclose();
   expect(sdkOptions.dataChannels["bar"].callbacks.close).toHaveBeenCalledTimes(
-    1
+    1,
   );
 
   let error = {
@@ -282,12 +282,12 @@ test("custom message callback is called", (done) => {
   // For `foo` data channel
   chans[0].onopen();
   expect(sdkOptions.dataChannels["foo"].callbacks.open).toHaveBeenCalledTimes(
-    1
+    1,
   );
 
   chans[0].onclose();
   expect(sdkOptions.dataChannels["foo"].callbacks.close).toHaveBeenCalledTimes(
-    1
+    1,
   );
 
   error = {

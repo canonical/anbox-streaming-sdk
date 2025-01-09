@@ -57,7 +57,7 @@ beforeEach(() => {
   global.navigator.__defineGetter__(
     "userAgent",
     () =>
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36"
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36",
   );
 });
 
@@ -70,30 +70,30 @@ test("SDK properly checks constructor options", () => {
 
   sdkOptions.targetElement = null;
   expect(() => new AnboxStream(sdkOptions)).toThrow(
-    "missing targetElement parameter"
+    "missing targetElement parameter",
   );
 
   sdkOptions.targetElement = "nonexistent";
   expect(() => new AnboxStream(sdkOptions)).toThrow(
-    'target element "nonexistent" does not exist'
+    'target element "nonexistent" does not exist',
   );
 
   sdkOptions.connector.connect = undefined;
   sdkOptions.targetElement = "foobar";
   expect(() => new AnboxStream(sdkOptions)).toThrow(
-    'missing "connect" method on connector'
+    'missing "connect" method on connector',
   );
 
   sdkOptions.connector.connect = () => {};
   sdkOptions.connector.disconnect = undefined;
   expect(() => new AnboxStream(sdkOptions)).toThrow(
-    'missing "disconnect" method on connector'
+    'missing "disconnect" method on connector',
   );
 
   sdkOptions.connector.disconnect = () => {};
   sdkOptions.foregroundActivity = "foo.bar.?com";
   expect(() => new AnboxStream(sdkOptions)).toThrow(
-    "invalid foreground activity name"
+    "invalid foreground activity name",
   );
 
   let options = {};
@@ -126,7 +126,7 @@ test("SDK properly checks constructor options", () => {
     },
   };
   expect(() => new AnboxStream(options)).toThrow(
-    "exceeds the maximum allowed length of data channels"
+    "exceeds the maximum allowed length of data channels",
   );
 
   options = {};
@@ -152,8 +152,8 @@ test("Video container with no size specified", () => {
   expect(() => new AnboxStream(options)).not.toThrow();
   expect(console.error).toHaveBeenCalledWith(
     expect.stringContaining(
-      "AnboxStream: video container element misses size. Please see https://documentation.ubuntu.com/anbox-cloud/en/latest/tutorial/stream-client"
-    )
+      "AnboxStream: video container element misses size. Please see https://documentation.ubuntu.com/anbox-cloud/en/latest/tutorial/stream-client",
+    ),
   );
   global.console.error.mockRestore();
 });
@@ -182,7 +182,7 @@ test("call methods before connecting", () => {
       altitude: 4,
       speed: 5,
       bearing: 6,
-    })
+    }),
   ).toEqual(false);
   expect(stream.sendIMECommittedText("foo")).toEqual(false);
   expect(stream.sendIMEComposingText("bar")).toEqual(false);
@@ -268,10 +268,10 @@ test("rotate video element", () => {
 
     expect(visualElement.style.transform).toEqual("rotate(90deg)");
     expect(stream._webrtcManager.sendControlMessage.mock.calls.length).toEqual(
-      1
+      1,
     );
     expect(stream._webrtcManager.sendControlMessage.mock.calls[0][0]).toEqual(
-      "screen::change_orientation"
+      "screen::change_orientation",
     );
     expect(stream._webrtcManager.sendControlMessage.mock.calls[0][1]).toEqual({
       orientation: "landscape",

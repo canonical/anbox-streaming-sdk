@@ -68,7 +68,7 @@ beforeEach(() => {
   global.navigator.__defineGetter__(
     "userAgent",
     () =>
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36"
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36",
   );
 });
 
@@ -107,18 +107,18 @@ test("can process keyboard events", () => {
 
   // Check disabled key combinations
   window.dispatchEvent(
-    new KeyboardEvent("keydown", { code: "KeyR", ctrlKey: true })
+    new KeyboardEvent("keydown", { code: "KeyR", ctrlKey: true }),
   );
   window.dispatchEvent(new KeyboardEvent("keydown", { code: "F5" }));
   window.dispatchEvent(
-    new KeyboardEvent("keydown", { code: "F5", ctrlKey: true })
+    new KeyboardEvent("keydown", { code: "F5", ctrlKey: true }),
   );
   window.dispatchEvent(
     new KeyboardEvent("keydown", {
       code: "KeyI",
       ctrlKey: true,
       shiftKey: true,
-    })
+    }),
   );
   window.dispatchEvent(new KeyboardEvent("keydown", { code: "F11" }));
   window.dispatchEvent(new KeyboardEvent("keydown", { code: "F12" }));
@@ -166,7 +166,7 @@ test("can process mouse button events", () => {
       ctrlKey: true,
       button: 0,
       pointerType: "mouse",
-    })
+    }),
   );
   expect(mockFn.mock.calls.length).toEqual(0);
 
@@ -176,7 +176,7 @@ test("can process mouse button events", () => {
       pointerType: "mouse",
       clientX: 500,
       clientY: 0,
-    })
+    }),
   ); // scroll wheel button
   expect(mockFn.mock.calls.length).toEqual(1);
   expect(mockFn.mock.calls[0][0]).toEqual("input::mouse-button");
@@ -188,7 +188,7 @@ test("can process mouse button events", () => {
       pointerType: "mouse",
       clientX: 500,
       clientY: 0,
-    })
+    }),
   );
   expect(mockFn.mock.calls.length).toEqual(2);
   expect(mockFn.mock.calls[1][0]).toEqual("input::mouse-button");
@@ -589,7 +589,7 @@ test("touch events when rotated", () => {
       clientX: 1500,
       clientY: 2000,
       pointerType: "touch",
-    })
+    }),
   );
   expect(mockFn.mock.calls.length).toEqual(1);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
@@ -602,7 +602,7 @@ test("touch events when rotated", () => {
       clientX: 2000,
       clientY: 500,
       pointerType: "touch",
-    })
+    }),
   );
   expect(mockFn.mock.calls[2][0]).toEqual("input::touch-move");
   expect(mockFn.mock.calls[2][1]).toEqual({ id: 0, x: 500, y: 1000 });
@@ -614,7 +614,7 @@ test("touch events when rotated", () => {
       clientX: 500,
       clientY: 0,
       pointerType: "touch",
-    })
+    }),
   );
   expect(mockFn.mock.calls[4][0]).toEqual("input::touch-move");
   // The pionter id will be auto-adjusted to 2 which is the minimal
@@ -628,7 +628,7 @@ test("touch events when rotated", () => {
       clientX: 0,
       clientY: 1500,
       pointerType: "touch",
-    })
+    }),
   );
   expect(mockFn.mock.calls[6][0]).toEqual("input::touch-move");
   expect(mockFn.mock.calls[6][1]).toEqual({ id: 0, x: 500, y: 1000 });
