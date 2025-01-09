@@ -69,7 +69,7 @@ beforeEach(() => {
   global.navigator.__defineGetter__(
     "userAgent",
     () =>
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36"
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36",
   );
 });
 
@@ -339,7 +339,7 @@ test("stats overlay is properly displayed", () => {
   mgr._webrtcManager._statsOverlayID = overlayContainer.id;
   mgr._webrtcManager.showStatsOverlay();
   expect(
-    document.getElementById(overlayContainer.id + "_child")
+    document.getElementById(overlayContainer.id + "_child"),
   ).not.toBeNull();
 
   mgr._webrtcManager.hideStatsOverlay();
