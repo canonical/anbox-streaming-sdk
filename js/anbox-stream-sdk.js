@@ -75,7 +75,6 @@ class AnboxStream {
    * @param options: {object}
    * @param options.connector {object} WebRTC Stream connector.
    * @param options.targetElement {string} ID of the DOM element to attach the video to.
-   * @param [options.verticalAlignment=center] {top | center | bottom} Vertical alignment of the video element in its container.
    * @param [options.fullScreen=false] {boolean} Stream video in full screen mode.
    * @param [options.deviceType] {string} Send the type of device the SDK is running on to the Android container.
    * @param [options.enableStats] {boolean} Enable collection of statistics. Not recommended in production.
@@ -591,13 +590,6 @@ class AnboxStream {
   _fillDefaults(options) {
     if (this._nullOrUndef(options.apiVersion))
       options.apiVersion = ANBOX_STREAM_SDK_MAX_CLIENT_API_VERSION;
-
-    if (
-      this._nullOrUndef(options.verticalAlignment) ||
-      !["top", "center", "bottom"].includes(options.verticalAlignment)
-    ) {
-      options.verticalAlignment = "center";
-    }
 
     if (this._nullOrUndef(options.fullScreen)) options.fullScreen = false;
 
@@ -1206,15 +1198,9 @@ class AnboxStream {
       case 180:
         visualElement.style.height = playerHeight.toString() + "px";
         visualElement.style.width = playerWidth.toString() + "px";
-        if (this._options.verticalAlignment === "top") {
-          visualElement.style.top = "0";
-        } else if (this._options.verticalAlignment === "bottom") {
-          visualElement.style.bottom = "0";
-        } else {
-          visualElement.style.top = `${Math.round(
-            container.clientHeight / 2 - playerHeight / 2,
-          )}px`;
-        }
+        visualElement.style.top = `${Math.round(
+          container.clientHeight / 2 - playerHeight / 2,
+        )}px`;
         visualElement.style.left = `${Math.round(
           container.clientWidth / 2 - playerWidth / 2,
         )}px`;
@@ -1223,15 +1209,9 @@ class AnboxStream {
       case 90:
         visualElement.style.height = playerWidth.toString() + "px";
         visualElement.style.width = playerHeight.toString() + "px";
-        if (this._options.verticalAlignment === "top") {
-          visualElement.style.top = "0";
-        } else if (this._options.verticalAlignment === "bottom") {
-          visualElement.style.bottom = "0";
-        } else {
-          visualElement.style.top = `${Math.round(
-            container.clientHeight / 2 - playerWidth / 2,
-          )}px`;
-        }
+        visualElement.style.top = `${Math.round(
+          container.clientHeight / 2 - playerWidth / 2,
+        )}px`;
         visualElement.style.left = `${Math.round(
           container.clientWidth / 2 - playerHeight / 2,
         )}px`;
@@ -3863,10 +3843,8 @@ class AnboxStreamCanvas {
     /* eslint-disable */
     const vertices = [
       // postion   // texture coordinate
-      -1.0, 1.0,   0.0, 1.0,
-      -1.0, -1.0,  0.0, 0.0,
-      1.0,  -1.0,  1.0, 0.0,
-      1.0,  1.0,   1.0, 1.0,
+      -1.0, 1.0, 0.0, 1.0, -1.0, -1.0, 0.0, 0.0, 1.0, -1.0, 1.0, 0.0, 1.0, 1.0,
+      1.0, 1.0,
     ];
     /* eslint-enable */
 
