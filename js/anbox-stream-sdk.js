@@ -257,6 +257,7 @@ class AnboxStream {
 
     try {
       this._webrtcManager.start(session);
+      this._queryGamePadEvents();
     } catch (e) {
       this._stopStreamingOnError(e);
       return;
@@ -1725,7 +1726,7 @@ class AnboxStream {
 
   _queryGamePadEvents() {
     if (!this._options.controls.gamepad) return;
-    let gamepads = navigator.getGamepads();
+    let gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
     if (gamepads.length > 0) {
       this._gamepadManager = new _gamepadEventManager(
         this._sendInputEvent.bind(this),
