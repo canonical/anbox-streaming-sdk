@@ -1728,6 +1728,9 @@ class AnboxStream {
     if (!this._options.controls.gamepad) return;
     let gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
     if (gamepads.length > 0) {
+      if (this._gamepadManager) {
+        this._gamepadManager.stopPolling();
+      }
       this._gamepadManager = new _gamepadEventManager(
         this._sendInputEvent.bind(this),
       );
