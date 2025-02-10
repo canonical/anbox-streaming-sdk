@@ -2818,14 +2818,16 @@ class AnboxWebRTCManager {
     this._controlChan.onerror = (err) => {
       if (this._controlChan !== null) {
         let code = ANBOX_STREAM_SDK_ERROR_WEBRTC_CONTROL_FAILED;
-        switch (err.error.sctpCauseCode) {
-          case SCP_CAUSE_CODE_USER_INITIATED_ABORT:
-            code = ANBOX_STREAM_SDK_ERROR_WEBRTC_DISCONNECTED;
-            break;
-          default:
-            break;
+        if (err.error) {
+          switch (err.error.sctpCauseCode) {
+            case SCP_CAUSE_CODE_USER_INITIATED_ABORT:
+              code = ANBOX_STREAM_SDK_ERROR_WEBRTC_DISCONNECTED;
+              break;
+            default:
+              break;
+          }
+          this._onError(`error on control channel: ${err.error.message}`, code);
         }
-        this._onError(`error on control channel: ${err.error.message}`, code);
       }
     };
     this._controlChan.onclose = () => this._log("control channel is closed");
