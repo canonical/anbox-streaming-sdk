@@ -2319,7 +2319,8 @@ class AnboxWebRTCManager {
     this._debugEnabled = options.debug;
     this._apiVersionInUse = options.apiVersion;
 
-    this._onError = () => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onError = (msg, code) => {};
     this._onReady = () => {};
     this._onClose = () => {};
     this._onMicRequested = () => false;
