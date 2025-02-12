@@ -2321,16 +2321,23 @@ class AnboxWebRTCManager {
 
     // eslint-disable-next-line no-unused-vars
     this._onError = (msg, code) => {};
-    this._onReady = () => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onReady = (videoStream, audioStream) => {};
     this._onClose = () => {};
     this._onMicRequested = () => false;
     this._onCameraRequested = () => false;
-    this._onMessage = () => {};
-    this._onStatsUpdated = () => {};
-    this._onIMEStateChanged = () => {};
-    this._onVhalPropConfigsReceived = () => {};
-    this._onVhalGetAnswerReceived = () => {};
-    this._onVhalSetAnswerReceived = () => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onMessage = (type, data) => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onStatsUpdated = (stats) => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onIMEStateChanged = (isChanged) => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onVhalPropConfigsReceived = (data) => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onVhalGetAnswerReceived = (data) => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onVhalSetAnswerReceived = (data) => {};
     this._onControlChannelOpen = () => {};
   }
 
@@ -3122,8 +3129,7 @@ class AnboxWebRTCManager {
 
       default:
         this._log(
-          "received ICE connection state change",
-          this._pc.iceConnectionState,
+          `received ICE connection state change: ${this._pc.iceConnectionState}`,
         );
         break;
     }
