@@ -1749,9 +1749,15 @@ class AnboxStream {
     return obj === null || obj === undefined;
   }
 
+  _isFatalError(code) {
+    return code !== ANBOX_STREAM_SDK_ERROR_USER_MEDIA;
+  }
+
   _stopStreamingOnError(msg, code) {
     this._options.callbacks.error(newError(msg, code));
-    this._stopStreaming();
+    if (this._isFatalError(code)) {
+      this._stopStreaming();
+    }
   }
 
   _IMEStateChanged(visible) {
@@ -2356,11 +2362,11 @@ class AnboxWebRTCManager {
 
   /**
    * @callback onWebRTCError
-   * @param error {string} Error message
+   * @param error {Error} Error object containing the message and code
    */
   /**
    * Called when the video track has been successfully created
-   * @param callback {onWebRTCError} Callback invoked with error message
+   * @param callback {onWebRTCError} Callback invoked with error object
    */
   onError(callback) {
     this._onError = (msg, code) => {
