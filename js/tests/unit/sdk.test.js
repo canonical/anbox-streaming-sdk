@@ -19,7 +19,10 @@
  * limitations under the License.
  */
 
-import { AnboxStream } from "./anbox-stream-sdk";
+import {
+  AnboxStream,
+  ANBOX_STREAM_SDK_ERROR_USER_MEDIA,
+} from "./anbox-stream-sdk";
 
 const sdkOptions = {};
 beforeEach(() => {
@@ -424,4 +427,43 @@ test("video or audio element should not exist when streaming with no audio and v
   expect(document.getElementsByTagName("audio").length).toEqual(0);
 
   expect(() => stream.disconnect()).not.toThrow();
+});
+
+test("do no stop streaming on non fatal errors", (done) => {
+  const stream = new AnboxStream(sdkOptions);
+  stream._stopStreamingOnError = jest.fn();
+  stream._webrtcManager.sendControlMessage = jest.fn(() => {
+    return true;
+  });
+  stream._webrtcManager.start = jest.fn();
+  stream._webrtcManager.stop = jest.fn(() => {
+    done();
+  });
+  stream._webrtcManager.onError = jest.fn(() => {});
+
+  const video = document.createElement("video");
+  video.id = stream._videoID;
+  const container = document.getElementById(sdkOptions.targetElement);
+  container.appendChild(video);
+  stream._onResize();
+
+  stream.connect();
+
+  // Simulate streaming
+  const streaming = async () => {
+    await new Promise((r) => setTimeout(r, 2000));
+  };
+  streaming();
+
+  // Simulate non fatal error occurs
+  const msg = "failed to open camera: NotFound";
+  const code = ANBOX_STREAM_SDK_ERROR_USER_MEDIA;
+  stream._webrtcManager._onError(msg, code);
+
+  expect(stream._stopStreamingOnError).toHaveBeenCalledWith(msg, code);
+  // webrtcManager.stop() should not triggered on non fatal errors
+  expect(stream._webrtcManager.stop).toHaveBeenCalledTimes(0);
+
+  expect(() => stream.disconnect()).not.toThrow();
+  expect(stream._webrtcManager.stop).toHaveBeenCalledTimes(1);
 });
