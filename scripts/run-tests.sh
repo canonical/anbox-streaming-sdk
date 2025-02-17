@@ -15,5 +15,5 @@
 # limitations under the License.
 
 for component in js ; do
-    ( cd "$component"; ./run-tests.sh )
+    ( cd "$component"; ./run-tests.sh $@ )
 done
