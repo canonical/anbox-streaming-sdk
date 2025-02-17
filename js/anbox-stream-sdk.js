@@ -2372,7 +2372,6 @@ class AnboxWebRTCManager {
     this._onError = (msg, code) => {
       if (this._debugEnabled) console.error(msg);
       callback(newError(msg, code));
-      this.stop();
     };
   }
 
