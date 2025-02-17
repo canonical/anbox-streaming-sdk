@@ -2442,7 +2442,7 @@ class AnboxWebRTCManager {
    */
   start(session) {
     if (session.websocket === undefined || session.websocket.length === 0) {
-      throw this._onError(
+      this._onError(
         "connector did not return any signaling information",
         ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED,
       );
