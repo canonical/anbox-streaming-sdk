@@ -23,11 +23,6 @@ jobs:
         # See `scripts/gen-version.sh`
         fetch-depth: "0"
 
-    - name: Get version
-      id: get-version
-      run: |
-        echo "version=$(./scripts/gen-version.sh)" >> $GITHUB_OUTPUT
-
     - name: Build
       run: |
         ./scripts/build.sh --create-tarball --version=${{ inputs.tag_name }}
