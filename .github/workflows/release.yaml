@@ -6,6 +6,11 @@ on:
       tag_name:
         description: 'Tag name for the release'
         required: true
+      target_commitish:
+        description: |
+          Target commitish (see GH API) for tag creation.
+          Can be empty - it will default to the head of the branch it is run from.
+        required: false
 
 # To publish assets to on GitHub release pages
 permissions:
@@ -32,3 +37,4 @@ jobs:
       with:
         files: anbox-streaming-sdk_${{ inputs.tag_name }}.zip
         tag_name: ${{ inputs.tag_name }}
+        target_commitish: ${{ inputs.target_commitish }}
