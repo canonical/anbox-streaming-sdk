@@ -18,10 +18,6 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      with:
-        # to avoid shadow clone which would impact the version generation
-        # See `scripts/gen-version.sh`
-        fetch-depth: "0"
 
     - name: Build
       run: |
