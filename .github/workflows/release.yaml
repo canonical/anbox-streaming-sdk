@@ -38,3 +38,5 @@ jobs:
         files: anbox-streaming-sdk_${{ inputs.tag_name }}.zip
         tag_name: ${{ inputs.tag_name }}
         target_commitish: ${{ inputs.target_commitish }}
+        body: |
+          See https://documentation.ubuntu.com/anbox-cloud/reference/release-notes/${{ inputs.tag_name }}/ for more information.
