@@ -33,7 +33,7 @@ jobs:
         echo "value=anbox-images-amd64-$(/bin/date -u "+%Y%m%d")" >> $GITHUB_OUTPUT
       shell: bash
     - name: Cache all images
-      uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4
+      uses: actions/cache/save@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4
       with:
         path: images
         key: ${{ steps.cache-key.outputs.value }}
