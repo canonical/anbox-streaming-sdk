@@ -467,3 +467,38 @@ test("do no stop streaming on non fatal errors", (done) => {
   expect(() => stream.disconnect()).not.toThrow();
   expect(stream._webrtcManager.stop).toHaveBeenCalledTimes(1);
 });
+
+test("player respects the vertical aligment settings", () => {
+  const verticalAlignments = ["top", "center", "bottom"];
+
+  for (const alignment of verticalAlignments) {
+    let opts = { ...sdkOptions };
+    opts.verticalAlignment = alignment;
+    const stream = new AnboxStream(opts);
+
+    const video = document.createElement("video");
+    video.id = stream._videoID;
+    video.__defineGetter__("videoWidth", () => 1000);
+    video.__defineGetter__("videoHeight", () => 500);
+
+    const container = document.getElementById(sdkOptions.targetElement);
+    container.__defineGetter__("clientWidth", () => 2000);
+    container.__defineGetter__("clientHeight", () => 2000);
+    container.appendChild(video);
+
+    stream._onResize();
+    let dimensions = stream._dimensions;
+    expect(dimensions.playerWidth).toEqual(2000);
+    expect(dimensions.playerHeight).toEqual(1000);
+
+    let expectedOffsetTop;
+    if (alignment === "top") {
+      expectedOffsetTop = 0;
+    } else if (alignment === "center") {
+      expectedOffsetTop = 500;
+    } else if (alignment === "bottom") {
+      expectedOffsetTop = 1000;
+    }
+    expect(dimensions.playerOffsetTop).toEqual(expectedOffsetTop);
+  }
+});
