@@ -1201,6 +1201,7 @@ class AnboxStream {
       this._streamCanvas.resize(video.videoWidth, video.videoHeight);
     }
 
+    let offsetTop;
     switch (this._currentRotation) {
       case 0:
       case 180:
@@ -1208,12 +1209,13 @@ class AnboxStream {
         visualElement.style.width = playerWidth.toString() + "px";
         if (this._options.verticalAlignment === "top") {
           visualElement.style.top = "0";
+          offsetTop = 0;
         } else if (this._options.verticalAlignment === "bottom") {
           visualElement.style.bottom = "0";
+          offsetTop = container.clientHeight - playerHeight;
         } else {
-          visualElement.style.top = `${Math.round(
-            container.clientHeight / 2 - playerHeight / 2,
-          )}px`;
+          offsetTop = Math.round(container.clientHeight / 2 - playerHeight / 2);
+          visualElement.style.top = `${offsetTop}px`;
         }
         visualElement.style.left = `${Math.round(
           container.clientWidth / 2 - playerWidth / 2,
@@ -1225,9 +1227,12 @@ class AnboxStream {
         visualElement.style.width = playerHeight.toString() + "px";
         if (this._options.verticalAlignment === "top") {
           visualElement.style.top = "0";
+          offsetTop = 0;
         } else if (this._options.verticalAlignment === "bottom") {
           visualElement.style.bottom = "0";
+          offsetTop = container.clientHeight - playerHeight;
         } else {
+          offsetTop = Math.round(container.clientHeight / 2 - playerHeight / 2);
           visualElement.style.top = `${Math.round(
             container.clientHeight / 2 - playerWidth / 2,
           )}px`;
@@ -1251,8 +1256,7 @@ class AnboxStream {
     }
 
     // The visual offset is always derived from the same formula, no matter the orientation.
-    const offsetTop = Math.round(container.clientHeight / 2 - playerHeight / 2); // + getPadding('top')
-    const offsetLeft = Math.round(container.clientWidth / 2 - playerWidth / 2); // + getPadding('left')
+    const offsetLeft = Math.round(container.clientWidth / 2 - playerWidth / 2);
 
     this._dimensions = {
       videoHeight: videoHeight,
