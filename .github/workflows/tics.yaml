@@ -20,8 +20,8 @@ jobs:
     name: Run TICS quality scan
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+    - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
       with:
         node-version: 20
 
@@ -40,7 +40,7 @@ jobs:
         amc config set container.security_updates false
 
     - name: Restore cached images
-      uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf # v4
+      uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
       with:
         path: images
         key: anbox-images-amd64
@@ -96,7 +96,7 @@ jobs:
 
     - name: Upload test results and coverage data
       if: always()
-      uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4
+      uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
       with:
         name: tics-test-reports
         path: |
@@ -106,7 +106,7 @@ jobs:
         retention-days: 7
 
     - name: Run TICS scan
-      uses: tiobe/tics-github-action@88cb795a736d2ca885753bec6ed2c8b03e3f892f # v3
+      uses: tiobe/tics-github-action@88cb795a736d2ca885753bec6ed2c8b03e3f892f # v3.3.0
       with:
         mode: qserver
         project: anbox-streaming-sdk
