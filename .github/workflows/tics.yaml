@@ -111,5 +111,5 @@ jobs:
         mode: qserver
         project: anbox-streaming-sdk
         viewerUrl: https://canonical.tiobe.com/tiobeweb/TICS/api/cfg?name=default
-        ticsAuthToken: ${{ secrets.TICS_AUTH_TOKEN }}
+        ticsAuthToken: ${{ secrets.TICSAUTHTOKEN }}
         installTics: true
