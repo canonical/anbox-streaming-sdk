@@ -18,7 +18,7 @@ concurrency:
 jobs:
   tics-scan:
     name: Run TICS quality scan
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, amd64, tiobe, jammy]
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
     - uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4
@@ -106,10 +106,9 @@ jobs:
         retention-days: 7
 
     - name: Run TICS scan
-      uses: tiobe/tics-github-action@009979693978bfefad2ad15c1020066694968dc7 # v3
-      with:
-        mode: qserver
-        project: anbox-streaming-sdk
-        viewerUrl: https://canonical.tiobe.com/tiobeweb/TICS/api/cfg?name=default
-        ticsAuthToken: ${{ secrets.TICSAUTHTOKEN }}
-        installTics: true
+      env:
+        TICSAUTHTOKEN: ${{ secrets.TICSAUTHTOKEN }}
+      run: |
+        set -x
+        source ~/.profile
+        TICSQServer -project anbox-streaming-sdk -tmpdir /tmp/tics
