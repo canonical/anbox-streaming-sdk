@@ -1,0 +1,103 @@
+name: Setup Trivy for security scanning and SBOM generation
+description: |
+  The action sets up Trivy, its database, and the KEV list, in an ideal case
+  from the GitHub cache to avoid making any requests to upstream repositories.
+  In case that no cached database, debian package, or KEV list is found, they
+  will be downloaded and cached.
+
+inputs:
+  arch:
+    description: |
+      Architecture to cache trivy for. Defaults to "amd64".
+    require: false
+    default: "amd64"
+
+runs:
+  using: composite
+  steps:
+  - name: Calculate cache keys
+    shell: bash
+    id: cache_keys
+    run: |
+      date="$(date +'%Y-%m-%d')"
+      echo "db=trivy-db-${{ inputs.arch }}-${date}" >> $GITHUB_OUTPUT
+      echo "deb=trivy-deb-${{ inputs.arch }}-${date}" >> $GITHUB_OUTPUT
+      echo "kev=kev-list-${date}" >> $GITHUB_OUTPUT
+
+  - name: Restore trivy deb from cache
+    id: cache_deb
+    uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+    with:
+      key: ${{ steps.cache_keys.outputs.deb }}
+      path: ${{ github.workspace }}/trivy.deb
+      restore-keys:
+        trivy-deb-${{ inputs.arch }}-
+
+  - name: Fetch debian package for Trivy
+    if: ${{ steps.cache_deb.outputs.cache-hit != 'true' }}
+    env:
+      TRIVY_VERSION: "0.57.0"
+      TRIVY_ARCH: ${{ inputs.arch == 'amd64' && '64bit' || 'ARM64' }}
+      TRIVY_SHA256: ${{ inputs.arch == 'amd64' && '0ef038ae7078449b89af6dcdd1cdecd744f65b8b50432797cda78846448c62dd' || '8ae7a057a32d98818c8504c2484017598437e117b9c96858d5749942c99cf1dd' }}
+    shell: bash
+    run: |
+      curl -L -o trivy.deb \
+        https://github.com/aquasecurity/trivy/releases/download/v"$TRIVY_VERSION"/trivy_"$TRIVY_VERSION"_Linux-"$TRIVY_ARCH".deb
+      echo "$TRIVY_SHA256 trivy.deb" | sha256sum --check --status
+
+  - name: Install trivy debian package
+    shell: bash
+    run: |
+      sudo apt install -y  ./trivy.deb
+
+  - name: Restore trivy db from cache
+    id: cache_db
+    uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+    with:
+      key: ${{ steps.cache_keys.outputs.db }}
+      path: ${{ github.workspace }}/.cache/trivy
+      restore-keys:
+        trivy-db-${{ inputs.arch }}-
+
+  - name: Set up oras
+    if: ${{ steps.cache_db.outputs.cache-hit != 'true' }}
+    shell: bash
+    env:
+      ORAS_VERSION: "1.2.0"
+      ORAS_SHA256: ${{ inputs.arch == 'amd64' && '5b3f1cbb86d869eee68120b9b45b9be983f3738442f87ee5f06b00edd0bab336' || '27df680a39fc2fcedc549cb737891623bc696c9a92a03fd341e9356a35836bae' }}
+    run: |
+      curl -L -o oras.tar.gz \
+        https://github.com/oras-project/oras/releases/download/v"${ORAS_VERSION}"/oras_"${ORAS_VERSION}"_linux_${{ inputs.arch }}.tar.gz
+      echo "$ORAS_SHA256 oras.tar.gz" | sha256sum --check --status
+      tar xf oras.tar.gz oras
+      chmod +x ./oras
+      sudo mv oras /usr/local/bin
+
+  - name: Download and extract the vulnerability DB
+    if: ${{ steps.cache_db.outputs.cache-hit != 'true' }}
+    shell: bash
+    run: |
+      mkdir -p "$GITHUB_WORKSPACE"/.cache/trivy/db
+      oras pull ghcr.io/aquasecurity/trivy-db:2
+      tar -xzf db.tar.gz -C "$GITHUB_WORKSPACE"/.cache/trivy/db
+      rm db.tar.gz
+
+      mkdir -p "$GITHUB_WORKSPACE"/.cache/trivy/java-db
+      oras pull ghcr.io/aquasecurity/trivy-java-db:1
+      tar -xzf javadb.tar.gz -C "$GITHUB_WORKSPACE"/.cache/trivy/java-db
+      rm javadb.tar.gz
+
+  - name: Restore KEV list from cache
+    id: cache_kev
+    uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+    with:
+      key: ${{ steps.cache_keys.outputs.kev }}
+      path: ${{ github.workspace }}/kev.json
+      restore-keys:
+        kev-list-
+
+  - name: Fetch KEV list from CISA
+    if: ${{ steps.cache_kev.outputs.cache-hit != 'true' }}
+    shell: bash
+    run: |
+      curl -s -o kev.json https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
