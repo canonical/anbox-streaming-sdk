@@ -1,0 +1,29 @@
+name: Run security scan
+on:
+  push:
+    branches:
+    - main
+    - stable-*
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Run Trivy security scan
+    runs-on: [self-hosted, linux, X64, jammy, large]
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    - name: Setup Trivy
+      uses: ./.github/actions/setup-trivy
+    - name: Run Trivy vulnerability scanner
+      run: |
+        trivy repository "$GITHUB_WORKSPACE" \
+          -c trivy.yaml \
+          --ignorefile .trivyignore \
+          --show-suppressed \
+          --cache-dir="$GITHUB_WORKSPACE"/.cache/trivy
+    - name: Compare Trivy results with KEV list
+      run: bash ./scripts/compare_kev_vulnerabilities.sh

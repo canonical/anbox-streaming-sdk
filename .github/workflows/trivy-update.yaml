@@ -1,0 +1,23 @@
+name: Update Trivy cache
+on:
+  workflow_dispatch:
+  # Run daily after midnight UTC
+  schedule:
+  - cron: '0 1 * * *'
+
+jobs:
+  trivy-update:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
+    runs-on: [self-hosted, linux, "${{ matrix.arch == 'amd64' && 'X64' || 'ARM64' }}", jammy, large]
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      with:
+        fetch-depth: 0
+    - name: Setup Trivy to warm up the cache
+      uses: ./.github/actions/setup-trivy
+      with:
+        arch: ${{ matrix.arch }}

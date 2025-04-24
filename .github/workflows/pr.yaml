@@ -38,6 +38,21 @@ jobs:
         if-no-files-found: error
         path: results/
 
+    - name: Setup Trivy
+      if: ${{ inputs.generate-sbom == 'true' }}
+      uses: ./.github/actions/setup-trivy
+      with:
+        arch: ${{ matrix.arch }}
+
+    - name: Generate SBOM for source code
+      if: ${{ inputs.generate-sbom == 'true' }}
+      run: |
+        trivy repository "$GITHUB_WORKSPACE" \
+          --format=spdx-json \
+          --skip-dirs=packaging \
+          --output=source-spdx.json \
+          --cache-dir=./.cache/trivy
+
   run-e2e-tests:
     needs: [build]
     name: Run e2e tests (appliance, amd64)
