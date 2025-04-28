@@ -1,48 +1,54 @@
-name: Create a branch
-
+name: Branch for stable series
 on:
   workflow_dispatch:
-    inputs:
-      branch_name:
-        description: 'Branch name to create'
-        required: true
-      bump_up_base_version:
-        description: 'Whether to bump up the base version'
-        required: false
-        default: 'true'
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  branch:
     runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'canonical' }}
+    environment: stable
     steps:
-    - name: Create branch
-      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
-      with:
-        script: |
-          await github.rest.git.createRef({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            ref: 'refs/heads/${{ inputs.branch_name }}',
-            sha: context.sha
-          })
-
-    - name: Checkout repository
-      if: inputs.bump_up_base_version == 'true' && startsWith(inputs.branch_name, 'stable-')
+    - name: Checkout
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-
-    - name: Update base version
-      if: inputs.bump_up_base_version == 'true' && startsWith(inputs.branch_name, 'stable-')
+      with:
+        ref: main
+        fetch-depth: 0
+    - name: Create branch and bump version
+      env:
+        AUTHOR_NAME: "Anbox Cloud CI Bot"
+        AUTHOR_EMAIL: "webops+anbox-cloud-ci-bot@canonical.com"
+        ANBOX_CLOUD_CI_BOT_SSH_KEY: ${{ secrets.ANBOX_CLOUD_CI_BOT_SSH_KEY }}
+        GH_TOKEN: ${{ github.token }}
       run: |
-        if [[ ${{ inputs.branch_name }} =~ ^stable-([0-9]+)\.([0-9]+)$ ]]; then
-          major_ver="${BASH_REMATCH[1]}"
-          minor_ver="$((${BASH_REMATCH[2]} + 1))"
-          echo "${major_ver}.${minor_ver}" > .base_version
-          git config --global user.email "github-actions@github.com"
-          git config --global user.name "GitHub Actions"
-          git add .base_version
-          git commit -m "feat(base_version): bump up base version to $(cat .base_version)"
-          git push origin main
+        # Setup SSH key based access so we can write a branch
+        . "$GITHUB_WORKSPACE"/scripts/setup-gh-ssh.sh
+
+        git config --global user.name "$AUTHOR_NAME"
+        git config --global user.email "$AUTHOR_EMAIL"
+
+        # First we create the new stable branch
+        series="$(cat .base_version | cut -d. -f1,2)"
+        minor="$(echo "$series" | cut -d. -f2)"
+        next_minor=$((minor+1))
+        next_version="1.$next_minor"
+        branch_name=stable-"$series"
+        git checkout -b "$branch_name"
+        git push git@github-anbox-streaming-sdk:canonical/anbox-streaming-sdk "$branch_name"
+
+        # Next we have to update main to include the new version number
+        branch=bump-version-to-"$next_version"
+        # If we already have a branch and PR we can stop here
+        if git branch -a | grep -q "$branch" ; then
+          exit 0
         fi
+        git checkout -b "$branch"
+        sed "s/${series}/${next_version}/g" -i .base_version js/anbox-stream-sdk.js
+        git add .base_version js/anbox-stream-sdk.js
+        git commit -m "chore: bump version to $next_version"
+        git push git@github-anbox-streaming-sdk:canonical/anbox-streaming-sdk "$branch"
+        gh pr create -B main -H "$branch" \
+          --title "Bump version to $next_version" \
+          --body "Automatically requested by workflow. Please close and reopen this PR to trigger workflows!"
