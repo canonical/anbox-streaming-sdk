@@ -9,7 +9,7 @@ chmod 0600 "$HOME"/.ssh/id_bot
 
 # Setup a host alias we can use with git push
 cat << EOF > "$HOME"/.ssh/config
-Host github-ams
+Host github-anbox-streaming-sdk
   Hostname github.com
   IdentityFile=$HOME/.ssh/id_bot
 EOF
