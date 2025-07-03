@@ -146,7 +146,7 @@ app.post("/application", async (req, res) => {
     resources: {
       cpus: 4,
       memory: "3GB",
-      "disk-size": "4GB",
+      "disk-size": "3GB",
     },
   };
   const manifestBuffer = Buffer.from(yaml.stringify(manifestJson));
