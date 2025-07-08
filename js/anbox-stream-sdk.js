@@ -668,6 +668,9 @@ class AnboxStream {
     if (this._nullOrUndef(options.callbacks.messageReceived))
       options.callbacks.messageReceived = () => {};
 
+    if (this._nullOrUndef(options.callbacks.statsUpdated))
+      options.callbacks.statsUpdated = () => {};
+
     if (this._nullOrUndef(options.callbacks.requestCameraAccess))
       options.callbacks.requestCameraAccess = () => false;
 
