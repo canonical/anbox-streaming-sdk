@@ -100,6 +100,7 @@ class AnboxStream {
    * @param [options.callbacks] {object} A list of callbacks to react on stream lifecycle events.
    * @param [options.callbacks.ready=none] {function} Called when the video and audio stream are ready to be inserted in the DOM.
    * @param [options.callbacks.error=none] {function} Called on stream error with the error object as a parameter.
+   * @param [options.callbacks.connectionEventReceived=none] {function} Called when WebRTC connection events are received.
    * @param [options.callbacks.done=none] {function} Called when the stream is closed.
    * @param [options.callbacks.messageReceived=none] {function} Called when a message is received from Anbox.
    * @param [options.callbacks.statsUpdated=none] {function} Called when the overall webrtc peer connection statistics are updated.
@@ -168,6 +169,9 @@ class AnboxStream {
       this._stopStreamingOnError(err.message, err.cause.code);
     });
     this._webrtcManager.onClose(this._stopStreaming.bind(this));
+    this._webrtcManager.onConnectionEventReceived(
+      this._options.callbacks.connectionEventReceived,
+    );
     this._webrtcManager.onStatsUpdated(this._options.callbacks.statsUpdated);
     this._webrtcManager.onMessage(this._options.callbacks.messageReceived);
     this._webrtcManager.onCameraRequested(
@@ -2351,6 +2355,7 @@ class AnboxWebRTCManager {
     this._onVhalGetAnswerReceived = (data) => {};
     // eslint-disable-next-line no-unused-vars
     this._onVhalSetAnswerReceived = (data) => {};
+    this._onConnectionEventReceived = () => {};
     this._onControlChannelOpen = () => {};
   }
 
@@ -2440,6 +2445,20 @@ class AnboxWebRTCManager {
    */
   onStatsUpdated(callback) {
     this._onStatsUpdated = callback;
+  }
+
+  /**
+   * @callback onConnectionEventReceived
+   * @param event {Object} WebRTC connection event details
+   */
+  /**
+   * Called when a WebRTC connection event occurs
+   * @param callback {onConnectionEventReceived} Callback invoked for WebRTC connection events
+   */
+  onConnectionEventReceived(callback) {
+    if (typeof callback === "function") {
+      this._onConnectionEventReceived = callback;
+    }
   }
 
   /**
@@ -2722,6 +2741,13 @@ class AnboxWebRTCManager {
     console.info(`Anbox SDK WebRTC [${Math.round(timeElapsed)}ms] : ${msg}`);
   }
 
+  _logConnectionEvent(event) {
+    this._onConnectionEventReceived({
+      timestamp: Date.now(),
+      ...event,
+    });
+  }
+
   _connectSignaler(url) {
     this._ws = new WebSocket(url);
     this._ws.onopen = this._onWsOpen.bind(this);
@@ -2896,9 +2922,18 @@ class AnboxWebRTCManager {
         };
         if (this._ws.readyState === 1) this._ws.send(JSON.stringify(msg));
 
+        this._logConnectionEvent({
+          type: "local_sdp:success",
+          raw: msg,
+        });
+
         this._applyPendingICECandiates();
       })
       .catch((err) => {
+        this._logConnectionEvent({
+          type: "local_sdp:error",
+          error: `${err}`,
+        });
         this._onError(
           `failed to create WebRTC answer: ${err}`,
           ANBOX_STREAM_SDK_ERROR_SIGNALING_FAILED,
@@ -2908,6 +2943,10 @@ class AnboxWebRTCManager {
 
   _onWsMessage(event) {
     const msg = JSON.parse(event.data);
+    this._logConnectionEvent({
+      type: "signaling:received",
+      raw: msg,
+    });
 
     switch (msg.type) {
       case "resp:discover":
@@ -3002,6 +3041,11 @@ class AnboxWebRTCManager {
   _onRtcOfferCreated(description) {
     const sdp = description.sdp;
     this._log(`got RTC offer:\n${sdp}`);
+    this._logConnectionEvent({
+      type: "offer:created",
+      sdpType: description.type,
+      sdp: sdp,
+    });
     this._pc.setLocalDescription(description);
     let msg = {
       type: "offer",
