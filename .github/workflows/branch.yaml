@@ -1,6 +1,13 @@
 name: Branch for stable series
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: |
+          Commit hash or other reference to use when branching. If not given
+          defaults to 'main'.
+        required: false
+        default: 'main'
 
 permissions:
   contents: write
@@ -15,7 +22,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       with:
-        ref: main
+        ref: ${{ inputs.ref }}
         fetch-depth: 0
     - name: Create branch and bump version
       env:
