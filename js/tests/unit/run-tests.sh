@@ -55,7 +55,7 @@ docker run --rm \
   -v $PWD:/anbox-streaming-sdk-unit-test \
   -e HOME=/anbox-streaming-sdk-unit-test \
   $extra_args \
-  node:20 \
+  node:22 \
   bash -c "cd /anbox-streaming-sdk-unit-test && \
               npm install --include=dev && \
               ./node_modules/.bin/eslint $ESLINT_ARGS *.js && \

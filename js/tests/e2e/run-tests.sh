@@ -18,7 +18,7 @@ ANBOX_STREAMING_SDK_DIR="$PWD/../../"
 
 docker run --rm \
   -v "$ANBOX_STREAMING_SDK_DIR:/anbox-streaming-sdk-js" \
-  node:20 \
+  node:22 \
   bash -c "cd /anbox-streaming-sdk-js/tests/e2e && \
            npm ci && \
            npx playwright install --with-deps && \
