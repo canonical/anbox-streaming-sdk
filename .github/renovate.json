@@ -9,5 +9,19 @@
     "helpers:pinGitHubActionDigestsToSemver",
     "group:allNonMajor",
     "group:allDigest"
+  ],
+  "packageRules": [
+    {
+      "groupName": "GitHub actions",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "digest",
+        "patch",
+        "minor",
+        "major"
+      ]
+    }
   ]
 }
