@@ -36,10 +36,11 @@ jobs:
         ./scripts/run-tests.sh
 
     - name: Release
-      uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2
-      with:
-        files: anbox-streaming-sdk_${{ inputs.tag_name }}.zip
-        tag_name: ${{ inputs.tag_name }}
-        target_commitish: ${{ inputs.target_commitish || github.ref }}
-        body: |
-          See https://documentation.ubuntu.com/anbox-cloud/reference/release-notes/${{ inputs.tag_name }}/ for more information.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "${{ inputs.tag_name }}" \
+          anbox-streaming-sdk_${{ inputs.tag_name }}.zip \
+          --target "${{ inputs.target_commitish || github.ref }}" \
+          --title "${{ inputs.tag_name }}" \
+          --notes "See https://documentation.ubuntu.com/anbox-cloud/reference/release-notes/${{ inputs.tag_name }}/ for more information."
