@@ -70,7 +70,7 @@ jobs:
         echo "base_version=$(cat .base_version)" >> "$GITHUB_OUTPUT"
 
     - name: Setup Anbox Cloud
-      uses: canonical/anbox-cloud-github-action@dc99b94280cfcf44a86b62aeac25ba34f14725e0
+      uses: canonical/anbox-cloud-github-action@ef0690184b1c8fd11e3385669726297bc2e3d368
       with:
         channel: ${{ steps.config.outputs.base_version }}/edge
 
@@ -79,7 +79,7 @@ jobs:
         amc config set container.security_updates false
 
     - name: Restore cached images
-      uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4
       with:
         path: images
         key: anbox-images-amd64
