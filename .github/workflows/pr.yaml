@@ -32,7 +32,7 @@ jobs:
         ./scripts/run-tests.sh
 
     - name: Collect artifacts
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: anbox-streaming-sdk_${{ steps.get-version.outputs.version }}
         if-no-files-found: error
@@ -70,7 +70,7 @@ jobs:
         echo "base_version=$(cat .base_version)" >> "$GITHUB_OUTPUT"
 
     - name: Setup Anbox Cloud
-      uses: canonical/anbox-cloud-github-action@dc99b94280cfcf44a86b62aeac25ba34f14725e0
+      uses: canonical/anbox-cloud-github-action@ef0690184b1c8fd11e3385669726297bc2e3d368
       with:
         channel: ${{ steps.config.outputs.base_version }}/edge
 
@@ -79,7 +79,7 @@ jobs:
         amc config set container.security_updates false
 
     - name: Restore cached images
-      uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
       with:
         path: images
         key: anbox-images-amd64
@@ -133,7 +133,7 @@ jobs:
           fi
         done
 
-    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       if: always()
       with:
         name: test-data-${{ steps.datetime.outputs.datetime }}
