@@ -97,6 +97,11 @@ class AnboxStream {
    * @param [options.devices.microphone=false] {boolean} Enable audio capture from microphone and send it to the remote peer.
    * @param [options.devices.camera=false] {boolean} Enable video capture from camera and send it to the remote peer.
    * @param [options.devices.speaker=true] {boolean} Enable audio playout through the default audio playback device.
+   * @param [options.devices.sensor] {object} Configuration for device sensors.
+   * @param [options.devices.sensor.enableOrientation=false] {boolean} Enable orientation sensor.
+   * @param [options.devices.sensor.enableAccelerometer=false] {boolean} Enable accelerometer.
+   * @param [options.devices.sensor.enableGyroscope=false] {boolean} Enable gyroscope.
+   * @param [options.devices.sensor.updateInterval=16] {integer} Interval in milliseconds at which sensor data is delivered to the Anbox container. Must be at least 10ms; otherwise, an ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT error will be thrown.
    * @param [options.controls] {object} Configuration how the client can interact with the stream.
    * @param [options.controls.keyboard=true] {boolean} Send key presses to the Android instance.
    * @param [options.controls.emulateTouch=false] {boolean} Emulate touchscreen by converting mouse inputs to touch inputs
@@ -212,6 +217,21 @@ class AnboxStream {
       // manager cache
       this._webrtcManager.sendControlMessage("vhal::get-all-prop-configs");
     });
+
+    this._sensorManager = null;
+    const sensorsEnabled =
+      this._options.devices.sensor.enableOrientation ||
+      this._options.devices.sensor.enableAccelerometer ||
+      this._options.devices.sensor.enableGyroscope;
+    if (sensorsEnabled) {
+      this._sensorManager = new AnboxSensorManager({
+        webrtcManager: this._webrtcManager,
+        updateInterval: this._options.devices.sensor.updateInterval,
+        enableOrientation: this._options.devices.sensor.enableOrientation,
+        enableAccelerometer: this._options.devices.sensor.enableAccelerometer,
+        enableGyroscope: this._options.devices.sensor.enableGyroscope,
+      });
+    }
 
     // Control options
     this._modifierState = 0;
@@ -625,6 +645,21 @@ class AnboxStream {
     if (this._nullOrUndef(options.devices.speaker))
       options.devices.speaker = true;
 
+    if (this._nullOrUndef(options.devices.sensor)) options.devices.sensor = {};
+
+    if (this._nullOrUndef(options.devices.sensor.updateInterval))
+      options.devices.sensor.updateInterval =
+        DEFAULT_SENSOR_DATA_UPDATE_INTERVAL;
+
+    if (this._nullOrUndef(options.devices.sensor.enableOrientation))
+      options.devices.sensor.enableOrientation = false;
+
+    if (this._nullOrUndef(options.devices.sensor.enableAccelerometer))
+      options.devices.sensor.enableAccelerometer = false;
+
+    if (this._nullOrUndef(options.devices.sensor.enableGyroscope))
+      options.devices.sensor.enableGyroscope = false;
+
     if (this._nullOrUndef(options.controls.keyboard))
       options.controls.keyboard = true;
 
@@ -922,6 +957,10 @@ class AnboxStream {
       audio.srcObject = audioSource;
     }
 
+    if (this._sensorManager) {
+      this._sensorManager.start();
+    }
+
     if (!this._options.stream.video && !this._options.stream.audio) {
       this._options.callbacks.ready();
     }
@@ -939,6 +978,10 @@ class AnboxStream {
     this._unregisterControls();
     if (this._gamepadManager) {
       this._gamepadManager.stopPolling();
+    }
+
+    if (this._sensorManager) {
+      this._sensorManager.stop();
     }
 
     this._webrtcManager.stop();
@@ -4432,29 +4475,31 @@ class AnboxVhalManager {
 class AnboxSensorManager {
   /**
    * AnboxSensorManager collects device sensor data and delivers it to the Anbox container
-   * @param options: {object}
-   * @param [options.webrtcManager] {object} WebRTC manager used to send sensor data over the control channel
-   * @param {number} [options.updateInterval=16] Interval in milliseconds at which sensor data is delivered to the Anbox container. Must be at least 10ms; otherwise, an ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT error will be thrown.
-   * @param [options.enableOrientation=true] {boolean} Whether to enable the orientation sensor
-   * @param [options.enableAccelerometer=true] {boolean} Whether to enable the accelerometer sensor
-   * @param [options.enableGyroscope=true] {boolean} Whether to enable the gyroscope
    */
   constructor(options = {}) {
-    this._options = {
-      webrtcManager: options.webrtcManager,
-      updateInterval:
-        options.updateInterval || DEFAULT_SENSOR_DATA_UPDATE_INTERVAL,
-      enableOrientation: options.enableOrientation !== false,
-      enableAccelerometer: options.enableAccelerometer !== false,
-      enableGyroscope: options.enableGyroscope !== false,
-    };
-
-    if (this._options.updateInterval < MINIMAL_SENSOR_DATA_UPDATE_INTERVAL) {
+    let updateInterval =
+      options.updateInterval ?? DEFAULT_SENSOR_DATA_UPDATE_INTERVAL;
+    if (typeof updateInterval !== "number") {
       throw newError(
-        `sensor update interval ${this._options.updateInterval}ms is less than the minimum of ${MINIMAL_SENSOR_DATA_UPDATE_INTERVAL}ms`,
+        `sensor update interval is invalid`,
         ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT,
       );
     }
+
+    if (updateInterval < MINIMAL_SENSOR_DATA_UPDATE_INTERVAL) {
+      throw newError(
+        `update interval ${updateInterval}ms is less than the minimum of ${MINIMAL_SENSOR_DATA_UPDATE_INTERVAL}ms`,
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT,
+      );
+    }
+
+    this._options = {
+      webrtcManager: options.webrtcManager,
+      updateInterval: updateInterval,
+      enableOrientation: options.enableOrientation,
+      enableAccelerometer: options.enableAccelerometer,
+      enableGyroscope: options.enableGyroscope,
+    };
 
     this._isActive = false;
     this._lastUpdateTime = 0;
@@ -4602,28 +4647,28 @@ class AnboxSensorManager {
     this._lastUpdateTime = now;
 
     if (this._options.enableOrientation) {
-       const data = {
-         sensor: "orientation",
-         ...this.sensorData.orientation,
-       }
+      const data = {
+        sensor: "orientation",
+        ...this.sensorData.orientation,
+      };
 
-       // NOTE: due to legacy reasons, a single column in the data type
-       // is used as a unique identifier for sensor event.
-       this._options.webrtcManager.sendControlMessage("sensor:event", data);
+      // NOTE: due to legacy reasons, a single column in the data type
+      // is used as a unique identifier for sensor event.
+      this._options.webrtcManager.sendControlMessage("sensor:event", data);
     }
     if (this._options.enableAccelerometer) {
-       const data = {
-         sensor: "acceleration",
-         ...this.sensorData.acceleration,
-       }
-       this._options.webrtcManager.sendControlMessage("sensor:event", data);
+      const data = {
+        sensor: "acceleration",
+        ...this.sensorData.acceleration,
+      };
+      this._options.webrtcManager.sendControlMessage("sensor:event", data);
     }
     if (this._options.enableGyroscope) {
-       const data = {
-         sensor: "gyroscope",
-         ...this.sensorData.gyroscope,
-       }
-       this._options.webrtcManager.sendControlMessage("sensor:event", data);
+      const data = {
+        sensor: "gyroscope",
+        ...this.sensorData.gyroscope,
+      };
+      this._options.webrtcManager.sendControlMessage("sensor:event", data);
     }
   }
 }
