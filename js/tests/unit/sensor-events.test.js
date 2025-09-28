@@ -22,7 +22,7 @@ import { AnboxStream } from "./anbox-stream-sdk";
 if (!global.DeviceOrientationEvent) {
   class DeviceOrientationEvent extends Event {
     constructor(type, params = {}) {
-      super(type, params);
+      super(type);
       this.alpha = params.alpha ?? 0.0;
       this.beta = params.beta ?? 0.0;
       this.gamma = params.gamma ?? 0.0;
@@ -35,15 +35,10 @@ if (!global.DeviceOrientationEvent) {
 if (!global.DeviceMotionEvent) {
   class DeviceMotionEvent extends Event {
     constructor(type, params = {}) {
-      super(type, params);
-      this.acceleration = params.acceleration ?? { x: 0.0, y: 0.0, z: 0.0 };
-      this.accelerationIncludingGravity =
-        params.accelerationIncludingGravity ?? { x: 0.0, y: 0.0, z: 0.0 };
-      this.rotationRate = params.rotationRate ?? {
-        alpha: 0.0,
-        beta: 0.0,
-        gamma: 0.0,
-      };
+      super(type);
+      this.acceleration = params.acceleration;
+      this.accelerationIncludingGravity = params.accelerationIncludingGravity;
+      this.rotationRate = params.rotationRate;
     }
   }
   global.DeviceMotionEvent = DeviceMotionEvent;
@@ -92,6 +87,18 @@ beforeEach(() => {
   );
 });
 
+test("should throw error when updateInterval option is non-numeric", () => {
+  sdkOptions.devices = {
+    sensor: {
+      updateInterval: "bla",
+      enableOrientation: true,
+    },
+  };
+  expect(() => new AnboxStream(sdkOptions)).toThrow(
+    "sensor update interval is invalid",
+  );
+});
+
 test("should throw error when updateInterval option is less than 10ms", () => {
   sdkOptions.devices = {
     sensor: {
@@ -102,6 +109,12 @@ test("should throw error when updateInterval option is less than 10ms", () => {
   expect(() => new AnboxStream(sdkOptions)).toThrow(
     "update interval 5ms is less than the minimum of 10ms",
   );
+});
+
+test("should not construct the sensor manager if it is not specified in the options.", () => {
+  sdkOptions.devices = {};
+  let { stream } = setupStream(sdkOptions);
+  expect(stream._sensorManager).toBeNull();
 });
 
 test("should not send sensor data to Anbox container if all sensors are disabled", () => {
@@ -116,7 +129,7 @@ test("should not send sensor data to Anbox container if all sensors are disabled
   expect(stream._sensorManager).toBeNull();
 });
 
-test("should send sensor accelerometer data to Anbox container if the sensor is enabled", () => {
+test("should send sensor accelerometer data with gravity included to Anbox container if the sensor is enabled", () => {
   sdkOptions.devices = {
     sensor: {
       enableAccelerometer: true,
@@ -140,9 +153,32 @@ test("should send sensor accelerometer data to Anbox container if the sensor is 
     y: 2.5,
     z: 3.0,
   });
-  // gyroscope or orientation data should be availabe in the payload as both are disabled.
-  expect(snapshots[0].type).not.toHaveProperty("gyroscope");
-  expect(snapshots[0].type).not.toHaveProperty("orientation");
+});
+
+test("should send sensor accelerometer data to Anbox container if the sensor is enabled", () => {
+  sdkOptions.devices = {
+    sensor: {
+      enableAccelerometer: true,
+    },
+  };
+  let { stream, snapshots } = setupStream(sdkOptions);
+  expect(stream._sensorManager).not.toBeNull();
+  stream._webrtcReady(null, null);
+
+  window.dispatchEvent(
+    new DeviceMotionEvent("devicemotion", {
+      acceleration: { x: 5.0, y: 2.5, z: 4.0 },
+    }),
+  );
+
+  expect(snapshots.length).toEqual(1);
+  expect(snapshots[0].type).toEqual("sensor:event");
+  expect(snapshots[0].data).toEqual({
+    sensor: "acceleration",
+    x: 5.0,
+    y: 2.5,
+    z: 4.0,
+  });
 });
 
 test("should send sensor orientation data to Anbox container if the sensor is enabled", () => {
@@ -171,8 +207,6 @@ test("should send sensor orientation data to Anbox container if the sensor is en
     pitch: 10.0,
     azimuth: 30.0,
   });
-  expect(snapshots[0].type).not.toHaveProperty("gyroscope");
-  expect(snapshots[0].type).not.toHaveProperty("acceleration");
 });
 
 test("should send sensor gyroscope data to Anbox container if the sensor is enabled", () => {
@@ -203,13 +237,12 @@ test("should send sensor gyroscope data to Anbox container if the sensor is enab
     y: 6.0,
     z: 8.0,
   });
-  expect(snapshots[0].type).not.toHaveProperty("orientation");
-  expect(snapshots[0].type).not.toHaveProperty("acceleration");
 });
 
 test("should not send sensor data within the update interval even if sensor data has changed", () => {
   sdkOptions.devices = {
     sensor: {
+      enableAccelerometer: true,
       enableGyroscope: true,
       updateInterval: 1000,
     },
@@ -217,6 +250,10 @@ test("should not send sensor data within the update interval even if sensor data
   let { stream, snapshots } = setupStream(sdkOptions);
   expect(stream._sensorManager).not.toBeNull();
   stream._webrtcReady(null, null);
+
+  const realDateNow = Date.now.bind(global.Date);
+  let fakeTime = realDateNow();
+  jest.spyOn(global.Date, "now").mockImplementation(() => fakeTime);
 
   window.dispatchEvent(
     new DeviceMotionEvent("devicemotion", {
@@ -237,8 +274,6 @@ test("should not send sensor data within the update interval even if sensor data
       y: 6.0,
       z: 8.0,
     });
-    expect(snapshots[0].type).not.toHaveProperty("orientation");
-    expect(snapshots[0].type).not.toHaveProperty("acceleration");
   };
 
   ensure_signal_update();
@@ -254,6 +289,33 @@ test("should not send sensor data within the update interval even if sensor data
   );
 
   ensure_signal_update();
+
+  // Advance 1 second
+  fakeTime += 1000;
+
+  // Capture data from acceleration sensor
+  window.dispatchEvent(
+    new DeviceMotionEvent("devicemotion", {
+      accelerationIncludingGravity: { x: 1.0, y: 2.5, z: 3.0 },
+    }),
+  );
+
+  // The new data should be sent
+  expect(snapshots.length).toEqual(3);
+  expect(snapshots[1].data).toEqual({
+    sensor: "acceleration",
+    x: 1.0,
+    y: 2.5,
+    z: 3.0,
+  });
+  expect(snapshots[2].data).toEqual({
+    sensor: "gyroscope",
+    x: 10.0,
+    y: 10.0,
+    z: 10.0,
+  });
+
+  global.Date.now.mockRestore();
 });
 
 test("should send sensor data to Anbox container if all sensors are enabled", () => {
@@ -279,25 +341,17 @@ test("should send sensor data to Anbox container if all sensors are enabled", ()
     }),
   );
 
-  expect(snapshots.length).toEqual(3);
+  expect(snapshots.length).toEqual(2);
   expect(snapshots[0].type).toEqual("sensor:event");
   expect(snapshots[0].data).toEqual({
-    sensor: "orientation",
-    roll: 0.0,
-    pitch: 0.0,
-    azimuth: 0.0,
+    sensor: "acceleration",
+    x: 1,
+    y: 2.5,
+    z: 3,
   });
 
   expect(snapshots[1].type).toEqual("sensor:event");
   expect(snapshots[1].data).toEqual({
-    sensor: "acceleration",
-    x: 1.0,
-    y: 2.5,
-    z: 3.0,
-  });
-
-  expect(snapshots[2].type).toEqual("sensor:event");
-  expect(snapshots[2].data).toEqual({
     sensor: "gyroscope",
     x: 7.0,
     y: 6.0,
@@ -320,29 +374,29 @@ test("should send sensor data to Anbox container if all sensors are enabled", ()
     }),
   );
 
-  expect(snapshots.length).toEqual(6);
+  expect(snapshots.length).toEqual(5);
+  expect(snapshots[2].type).toEqual("sensor:event");
+  expect(snapshots[2].data).toEqual({
+    sensor: "orientation",
+    roll: 12.0,
+    pitch: 10.0,
+    azimuth: 30.0,
+  });
+
   expect(snapshots[3].type).toEqual("sensor:event");
   expect(snapshots[3].data).toEqual({
-    sensor: "orientation",
-    azimuth: 30,
-    pitch: 10,
-    roll: 12,
+    sensor: "acceleration",
+    x: 1,
+    y: 2.5,
+    z: 3,
   });
 
   expect(snapshots[4].type).toEqual("sensor:event");
   expect(snapshots[4].data).toEqual({
-    sensor: "acceleration",
-    x: 1.0,
-    y: 2.5,
-    z: 3.0,
-  });
-
-  expect(snapshots[5].type).toEqual("sensor:event");
-  expect(snapshots[5].data).toEqual({
     sensor: "gyroscope",
-    x: 7,
-    y: 6,
-    z: 8,
+    x: 7.0,
+    y: 6.0,
+    z: 8.0,
   });
 
   global.Date.now.mockRestore();
