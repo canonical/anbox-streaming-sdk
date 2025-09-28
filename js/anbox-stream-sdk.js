@@ -74,6 +74,11 @@ function newError(msg, code) {
   return new Error(msg, options);
 }
 
+function _fuzzyCompare(n1, n2, precision = 0.000001) {
+  if (n1 === null || n2 === null) return false;
+  return Math.abs(n1 - n2) <= precision;
+}
+
 class AnboxStream {
   /**
    * AnboxStream creates a connection between your client and an Android instance and
@@ -4505,21 +4510,9 @@ class AnboxSensorManager {
     this._lastUpdateTime = 0;
 
     this.sensorData = {
-      orientation: {
-        roll: 0.0, // X-axis (β) [-180, 180]
-        pitch: 0.0, // Y-axis (γ) [-90, 90]
-        azimuth: 0.0, // Z-axis (α) [0, 360]
-      },
-      acceleration: {
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-      },
-      gyroscope: {
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-      },
+      orientation: null,
+      acceleration: null,
+      gyroscope: null,
     };
 
     this._onDeviceOrientation = this._onDeviceOrientation.bind(this);
@@ -4603,38 +4596,70 @@ class AnboxSensorManager {
   _onDeviceOrientation(event) {
     if (!this._options.enableOrientation) return;
 
-    this.sensorData.orientation = {
-      roll: event.beta || 0.0,
-      pitch: event.gamma || 0.0,
-      azimuth: event.alpha || 0.0,
-    };
+    if (!this.sensorData.orientation) {
+      this.sensorData.orientation = { roll: null, pitch: null, azimuth: null };
+    }
+    const o = this.sensorData.orientation;
+    const roll = event.beta;
+    const pitch = event.gamma;
+    const azimuth = event.alpha;
+
+    if (
+      _fuzzyCompare(o.roll, roll) &&
+      _fuzzyCompare(o.pitch, pitch) &&
+      _fuzzyCompare(o.azimuth, azimuth)
+    )
+      return;
+
+    o.roll = roll;
+    o.pitch = pitch;
+    o.azimuth = azimuth;
 
     this._onSensorDataUpdate();
   }
 
   _onDeviceMotion(event) {
+    let dataChanged = false;
+
     // Prefer using accelerationIncludingGravity, which includes the effect of gravity,
     // fallback to acceleration if it's not available
-    const acceleration =
-      event.accelerationIncludingGravity || event.acceleration;
-    if (this._options.enableAccelerometer && acceleration) {
-      this.sensorData.acceleration = {
-        x: acceleration.x || 0.0,
-        y: acceleration.y || 0.0,
-        z: acceleration.z || 0.0,
-      };
+    const acc = event.accelerationIncludingGravity || event.acceleration;
+    if (this._options.enableAccelerometer && acc) {
+      if (!this.sensorData.acceleration) {
+        this.sensorData.acceleration = { x: null, y: null, z: null };
+      }
+      const a = this.sensorData.acceleration;
+      if (
+        !_fuzzyCompare(a.x, acc.x) ||
+        !_fuzzyCompare(a.y, acc.y) ||
+        !_fuzzyCompare(a.z, acc.z)
+      ) {
+        a.x = acc.x;
+        a.y = acc.y;
+        a.z = acc.z;
+        dataChanged = true;
+      }
     }
 
-    const rotationRate = event.rotationRate;
-    if (this._options.enableGyroscope && rotationRate) {
-      this.sensorData.gyroscope = {
-        z: rotationRate.alpha || 0.0,
-        x: rotationRate.beta || 0.0,
-        y: rotationRate.gamma || 0.0,
-      };
+    const rot = event.rotationRate;
+    if (this._options.enableGyroscope && rot) {
+      if (!this.sensorData.gyroscope) {
+        this.sensorData.gyroscope = { x: null, y: null, z: null };
+      }
+      const g = this.sensorData.gyroscope;
+      if (
+        !_fuzzyCompare(g.x, rot.beta) ||
+        !_fuzzyCompare(g.y, rot.gamma) ||
+        !_fuzzyCompare(g.z, rot.alpha)
+      ) {
+        g.x = rot.beta;
+        g.y = rot.gamma;
+        g.z = rot.alpha;
+        dataChanged = true;
+      }
     }
 
-    this._onSensorDataUpdate();
+    if (dataChanged) this._onSensorDataUpdate();
   }
 
   _onSensorDataUpdate() {
@@ -4646,7 +4671,7 @@ class AnboxSensorManager {
 
     this._lastUpdateTime = now;
 
-    if (this._options.enableOrientation) {
+    if (this._options.enableOrientation && this.sensorData.orientation) {
       const data = {
         sensor: "orientation",
         ...this.sensorData.orientation,
@@ -4656,14 +4681,14 @@ class AnboxSensorManager {
       // is used as a unique identifier for sensor event.
       this._options.webrtcManager.sendControlMessage("sensor:event", data);
     }
-    if (this._options.enableAccelerometer) {
+    if (this._options.enableAccelerometer && this.sensorData.acceleration) {
       const data = {
         sensor: "acceleration",
         ...this.sensorData.acceleration,
       };
       this._options.webrtcManager.sendControlMessage("sensor:event", data);
     }
-    if (this._options.enableGyroscope) {
+    if (this._options.enableGyroscope && this.sensorData.gyroscope) {
       const data = {
         sensor: "gyroscope",
         ...this.sensorData.gyroscope,

@@ -401,3 +401,43 @@ test("should send sensor data to Anbox container if all sensors are enabled", ()
 
   global.Date.now.mockRestore();
 });
+
+test("should not not send sensor data when there are no changes", () => {
+  sdkOptions.devices = {
+    sensor: {
+      enableGyroscope: true,
+    },
+  };
+
+  let { stream, snapshots } = setupStream(sdkOptions);
+  expect(stream._sensorManager).not.toBeNull();
+  stream._webrtcReady(null, null);
+
+  const dispatch_event = () => {
+    window.dispatchEvent(
+      new DeviceMotionEvent("devicemotion", {
+        rotationRate: {
+          alpha: 8.0,
+          beta: 7.0,
+          gamma: 6.0,
+        },
+      }),
+    );
+  };
+
+  dispatch_event();
+
+  expect(snapshots.length).toEqual(1);
+  expect(snapshots[0].type).toEqual("sensor:event");
+  expect(snapshots[0].data).toEqual({
+    sensor: "gyroscope",
+    x: 7.0,
+    y: 6.0,
+    z: 8.0,
+  });
+
+  dispatch_event();
+
+  // No new sensor data should be sent to the Anbox container
+  expect(snapshots.length).toEqual(1);
+});
