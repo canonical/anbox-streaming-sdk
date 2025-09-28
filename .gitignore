@@ -1,3 +1,4 @@
 .npm
 node_modules
 .idea
+js/tests/unit/anbox-stream-sdk.js
