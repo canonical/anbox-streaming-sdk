@@ -56,6 +56,12 @@ export const ANBOX_STREAM_SDK_MAX_CLIENT_API_VERSION = 2;
 // See https://datatracker.ietf.org/doc/html/rfc4960#section-3.3.10
 const SCP_CAUSE_CODE_USER_INITIATED_ABORT = 12;
 
+// Default sensor data update interval(60Hz)
+const DEFAULT_SENSOR_DATA_UPDATE_INTERVAL = 16;
+
+// Minimum allowed interval for sensor data updates
+const MINIMAL_SENSOR_DATA_UPDATE_INTERVAL = 10;
+
 function newError(msg, code) {
   var options = {
     cause: {
@@ -66,6 +72,11 @@ function newError(msg, code) {
   if (Number.isInteger(code)) options.cause.code = code;
 
   return new Error(msg, options);
+}
+
+function _fuzzyCompare(n1, n2, precision = 0.000001) {
+  if (n1 === null || n2 === null) return false;
+  return Math.abs(n1 - n2) <= precision;
 }
 
 class AnboxStream {
@@ -91,6 +102,11 @@ class AnboxStream {
    * @param [options.devices.microphone=false] {boolean} Enable audio capture from microphone and send it to the remote peer.
    * @param [options.devices.camera=false] {boolean} Enable video capture from camera and send it to the remote peer.
    * @param [options.devices.speaker=true] {boolean} Enable audio playout through the default audio playback device.
+   * @param [options.devices.sensor] {object} Configuration for device sensors.
+   * @param [options.devices.sensor.enableOrientation=false] {boolean} Enable orientation sensor.
+   * @param [options.devices.sensor.enableAccelerometer=false] {boolean} Enable accelerometer.
+   * @param [options.devices.sensor.enableGyroscope=false] {boolean} Enable gyroscope.
+   * @param [options.devices.sensor.updateInterval=16] {integer} Interval in milliseconds at which sensor data is delivered to the Anbox container. Must be at least 10ms; otherwise, an ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT error will be thrown.
    * @param [options.controls] {object} Configuration how the client can interact with the stream.
    * @param [options.controls.keyboard=true] {boolean} Send key presses to the Android instance.
    * @param [options.controls.emulateTouch=false] {boolean} Emulate touchscreen by converting mouse inputs to touch inputs
@@ -206,6 +222,21 @@ class AnboxStream {
       // manager cache
       this._webrtcManager.sendControlMessage("vhal::get-all-prop-configs");
     });
+
+    this._sensorManager = null;
+    const sensorsEnabled =
+      this._options.devices.sensor.enableOrientation ||
+      this._options.devices.sensor.enableAccelerometer ||
+      this._options.devices.sensor.enableGyroscope;
+    if (sensorsEnabled) {
+      this._sensorManager = new AnboxSensorManager({
+        webrtcManager: this._webrtcManager,
+        updateInterval: this._options.devices.sensor.updateInterval,
+        enableOrientation: this._options.devices.sensor.enableOrientation,
+        enableAccelerometer: this._options.devices.sensor.enableAccelerometer,
+        enableGyroscope: this._options.devices.sensor.enableGyroscope,
+      });
+    }
 
     // Control options
     this._modifierState = 0;
@@ -619,6 +650,21 @@ class AnboxStream {
     if (this._nullOrUndef(options.devices.speaker))
       options.devices.speaker = true;
 
+    if (this._nullOrUndef(options.devices.sensor)) options.devices.sensor = {};
+
+    if (this._nullOrUndef(options.devices.sensor.updateInterval))
+      options.devices.sensor.updateInterval =
+        DEFAULT_SENSOR_DATA_UPDATE_INTERVAL;
+
+    if (this._nullOrUndef(options.devices.sensor.enableOrientation))
+      options.devices.sensor.enableOrientation = false;
+
+    if (this._nullOrUndef(options.devices.sensor.enableAccelerometer))
+      options.devices.sensor.enableAccelerometer = false;
+
+    if (this._nullOrUndef(options.devices.sensor.enableGyroscope))
+      options.devices.sensor.enableGyroscope = false;
+
     if (this._nullOrUndef(options.controls.keyboard))
       options.controls.keyboard = true;
 
@@ -916,6 +962,10 @@ class AnboxStream {
       audio.srcObject = audioSource;
     }
 
+    if (this._sensorManager) {
+      this._sensorManager.start();
+    }
+
     if (!this._options.stream.video && !this._options.stream.audio) {
       this._options.callbacks.ready();
     }
@@ -933,6 +983,10 @@ class AnboxStream {
     this._unregisterControls();
     if (this._gamepadManager) {
       this._gamepadManager.stopPolling();
+    }
+
+    if (this._sensorManager) {
+      this._sensorManager.stop();
     }
 
     this._webrtcManager.stop();
@@ -4420,6 +4474,227 @@ class AnboxVhalManager {
 
   hasConfigs() {
     return !this._nullOrUndef(this._configStore) && this._configStore.size > 0;
+  }
+}
+
+class AnboxSensorManager {
+  /**
+   * AnboxSensorManager collects device sensor data and delivers it to the Anbox container
+   */
+  constructor(options = {}) {
+    let updateInterval =
+      options.updateInterval ?? DEFAULT_SENSOR_DATA_UPDATE_INTERVAL;
+    if (typeof updateInterval !== "number") {
+      throw newError(
+        `sensor update interval is invalid`,
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT,
+      );
+    }
+
+    if (updateInterval < MINIMAL_SENSOR_DATA_UPDATE_INTERVAL) {
+      throw newError(
+        `update interval ${updateInterval}ms is less than the minimum of ${MINIMAL_SENSOR_DATA_UPDATE_INTERVAL}ms`,
+        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT,
+      );
+    }
+
+    this._options = {
+      webrtcManager: options.webrtcManager,
+      updateInterval: updateInterval,
+      enableOrientation: options.enableOrientation,
+      enableAccelerometer: options.enableAccelerometer,
+      enableGyroscope: options.enableGyroscope,
+    };
+
+    this._isActive = false;
+    this._lastUpdateTime = 0;
+
+    this.sensorData = {
+      orientation: null,
+      acceleration: null,
+      gyroscope: null,
+    };
+
+    this._onDeviceOrientation = this._onDeviceOrientation.bind(this);
+    this._onDeviceMotion = this._onDeviceMotion.bind(this);
+    this._onSensorDataUpdate = this._onSensorDataUpdate.bind(this);
+  }
+
+  /*
+   Start to capture sensor data
+   @returns {boolean} Whether the sensor data capture started successfully
+  */
+  start() {
+    if (this._isActive) return true;
+
+    try {
+      if (this._options.enableOrientation && window.DeviceOrientationEvent) {
+        window.addEventListener(
+          "deviceorientation",
+          this._onDeviceOrientation,
+          false,
+        );
+      } else if (this._options.enableOrientation) {
+        console.warn(
+          "AnboxSensorManager: orientation sensor not supported on this device",
+        );
+      }
+
+      if (
+        (this._options.enableAccelerometer || this._options.enableGyroscope) &&
+        window.DeviceMotionEvent
+      ) {
+        window.addEventListener("devicemotion", this._onDeviceMotion, false);
+      } else if (
+        this._options.enableAccelerometer ||
+        this._options.enableGyroscope
+      ) {
+        console.warn(
+          "AnboxSensorManager: motion sensors not supported on this device",
+        );
+      }
+
+      this._isActive = true;
+      return true;
+    } catch (error) {
+      console.error(
+        "AnboxSensorManager: failed to start capturing sensor data:",
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Stop capturing sensor data
+   */
+  stop() {
+    if (!this._isActive) return;
+
+    try {
+      if (window.DeviceOrientationEvent) {
+        window.removeEventListener(
+          "deviceorientation",
+          this._onDeviceOrientation,
+          false,
+        );
+      }
+
+      if (window.DeviceMotionEvent) {
+        window.removeEventListener("devicemotion", this._onDeviceMotion, false);
+      }
+
+      this._isActive = false;
+    } catch (error) {
+      console.error(
+        "AnboxSensorManager: failed to stop capturing sensor data",
+        error,
+      );
+    }
+  }
+
+  _onDeviceOrientation(event) {
+    if (!this._options.enableOrientation) return;
+
+    if (!this.sensorData.orientation) {
+      this.sensorData.orientation = { roll: null, pitch: null, azimuth: null };
+    }
+    const o = this.sensorData.orientation;
+    const roll = event.beta;
+    const pitch = event.gamma;
+    const azimuth = event.alpha;
+
+    if (
+      _fuzzyCompare(o.roll, roll) &&
+      _fuzzyCompare(o.pitch, pitch) &&
+      _fuzzyCompare(o.azimuth, azimuth)
+    )
+      return;
+
+    o.roll = roll;
+    o.pitch = pitch;
+    o.azimuth = azimuth;
+
+    this._onSensorDataUpdate();
+  }
+
+  _onDeviceMotion(event) {
+    let dataChanged = false;
+
+    // Prefer using accelerationIncludingGravity, which includes the effect of gravity,
+    // fallback to acceleration if it's not available
+    const acc = event.accelerationIncludingGravity || event.acceleration;
+    if (this._options.enableAccelerometer && acc) {
+      if (!this.sensorData.acceleration) {
+        this.sensorData.acceleration = { x: null, y: null, z: null };
+      }
+      const a = this.sensorData.acceleration;
+      if (
+        !_fuzzyCompare(a.x, acc.x) ||
+        !_fuzzyCompare(a.y, acc.y) ||
+        !_fuzzyCompare(a.z, acc.z)
+      ) {
+        a.x = acc.x;
+        a.y = acc.y;
+        a.z = acc.z;
+        dataChanged = true;
+      }
+    }
+
+    const rot = event.rotationRate;
+    if (this._options.enableGyroscope && rot) {
+      if (!this.sensorData.gyroscope) {
+        this.sensorData.gyroscope = { x: null, y: null, z: null };
+      }
+      const g = this.sensorData.gyroscope;
+      if (
+        !_fuzzyCompare(g.x, rot.beta) ||
+        !_fuzzyCompare(g.y, rot.gamma) ||
+        !_fuzzyCompare(g.z, rot.alpha)
+      ) {
+        g.x = rot.beta;
+        g.y = rot.gamma;
+        g.z = rot.alpha;
+        dataChanged = true;
+      }
+    }
+
+    if (dataChanged) this._onSensorDataUpdate();
+  }
+
+  _onSensorDataUpdate() {
+    // Throttle sensor data updates to avoid sending data too frequently,
+    // which could affect overall data transmission over the data channel
+    // and further negatively impact the Android container.
+    const now = Date.now();
+    if (now - this._lastUpdateTime < this._options.updateInterval) return;
+
+    this._lastUpdateTime = now;
+
+    if (this._options.enableOrientation && this.sensorData.orientation) {
+      const data = {
+        sensor: "orientation",
+        ...this.sensorData.orientation,
+      };
+
+      // NOTE: due to legacy reasons, a single column in the data type
+      // is used as a unique identifier for sensor event.
+      this._options.webrtcManager.sendControlMessage("sensor:event", data);
+    }
+    if (this._options.enableAccelerometer && this.sensorData.acceleration) {
+      const data = {
+        sensor: "acceleration",
+        ...this.sensorData.acceleration,
+      };
+      this._options.webrtcManager.sendControlMessage("sensor:event", data);
+    }
+    if (this._options.enableGyroscope && this.sensorData.gyroscope) {
+      const data = {
+        sensor: "gyroscope",
+        ...this.sensorData.gyroscope,
+      };
+      this._options.webrtcManager.sendControlMessage("sensor:event", data);
+    }
   }
 }
 
