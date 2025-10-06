@@ -135,8 +135,8 @@ app.delete("/application", function (req, res) {
 app.post("/application", async (req, res) => {
   const appName = req.query.name;
   const imageName = appName.endsWith("AAOS")
-    ? "jammy:aaos13"
-    : "jammy:android13";
+    ? "jammy:aaos15"
+    : "jammy:android14";
   const manifestJson = {
     name: appName,
     image: `${imageName}:${await getArch()}`,

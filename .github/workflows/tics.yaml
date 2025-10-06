@@ -49,7 +49,7 @@ jobs:
 
     - name: Import cached images
       run: |
-        for name in android13 aaos13 ; do
+        for name in android14 aaos15 ; do
           amc image add jammy:"$name":amd64 "$GITHUB_WORKSPACE"/images/"$name"_amd64.tar.xz
         done
 
