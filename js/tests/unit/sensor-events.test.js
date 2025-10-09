@@ -44,6 +44,24 @@ if (!global.DeviceMotionEvent) {
   global.DeviceMotionEvent = DeviceMotionEvent;
 }
 
+function send_sensor_operation_message(stream, sensor, op) {
+  const ev = {
+    data: JSON.stringify({
+      type: op,
+      data: JSON.stringify({ type: sensor }),
+    }),
+  };
+  stream._webrtcManager._onControlMessageReceived(ev);
+}
+
+function deactivate_sensor(stream, sensor) {
+  send_sensor_operation_message(stream, sensor, "deactivate-sensor");
+}
+
+function activate_sensor(stream, sensor) {
+  send_sensor_operation_message(stream, sensor, "activate-sensor");
+}
+
 const sdkOptions = {};
 function setupStream(sdkOptions) {
   let stream = new AnboxStream(sdkOptions);
@@ -137,8 +155,8 @@ test("should send sensor accelerometer data with gravity included to Anbox conta
   };
   let { stream, snapshots } = setupStream(sdkOptions);
   expect(stream._sensorManager).not.toBeNull();
-  stream._webrtcReady(null, null);
 
+  activate_sensor(stream, "acceleration");
   window.dispatchEvent(
     new DeviceMotionEvent("devicemotion", {
       accelerationIncludingGravity: { x: 1.0, y: 2.5, z: 3.0 },
@@ -163,8 +181,8 @@ test("should send sensor accelerometer data to Anbox container if the sensor is 
   };
   let { stream, snapshots } = setupStream(sdkOptions);
   expect(stream._sensorManager).not.toBeNull();
-  stream._webrtcReady(null, null);
 
+  activate_sensor(stream, "acceleration");
   window.dispatchEvent(
     new DeviceMotionEvent("devicemotion", {
       acceleration: { x: 5.0, y: 2.5, z: 4.0 },
@@ -189,7 +207,7 @@ test("should send sensor orientation data to Anbox container if the sensor is en
   };
   let { stream, snapshots } = setupStream(sdkOptions);
   expect(stream._sensorManager).not.toBeNull();
-  stream._webrtcReady(null, null);
+  activate_sensor(stream, "orientation");
 
   window.dispatchEvent(
     new DeviceOrientationEvent("deviceorientation", {
@@ -217,7 +235,7 @@ test("should send sensor gyroscope data to Anbox container if the sensor is enab
   };
   let { stream, snapshots } = setupStream(sdkOptions);
   expect(stream._sensorManager).not.toBeNull();
-  stream._webrtcReady(null, null);
+  activate_sensor(stream, "gyroscope");
 
   window.dispatchEvent(
     new DeviceMotionEvent("devicemotion", {
@@ -239,6 +257,143 @@ test("should send sensor gyroscope data to Anbox container if the sensor is enab
   });
 });
 
+test("should not send sensor data if sensor is not activated from the server side", () => {
+  sdkOptions.devices = {
+    sensor: {
+      enableAccelerometer: true,
+      enableGyroscope: true,
+      enableOrientation: true,
+    },
+  };
+  let { stream, snapshots } = setupStream(sdkOptions);
+  expect(stream._sensorManager).not.toBeNull();
+
+  window.dispatchEvent(
+    new DeviceMotionEvent("devicemotion", {
+      rotationRate: {
+        alpha: 8.0,
+        beta: 7.0,
+        gamma: 6.0,
+      },
+      accelerationIncludingGravity: { x: 1.0, y: 2.5, z: 3.0 },
+    }),
+  );
+
+  window.dispatchEvent(
+    new DeviceOrientationEvent("deviceorientation", {
+      alpha: 30.0,
+      beta: 12.0,
+      gamma: 10.0,
+    }),
+  );
+
+  expect(snapshots.length).toEqual(0);
+});
+
+test("should send sensor data if sensor is re-activated from the server side", () => {
+  sdkOptions.devices = {
+    sensor: {
+      enableAccelerometer: true,
+      enableGyroscope: true,
+      updateInterval: 1000,
+    },
+  };
+  let { stream, snapshots } = setupStream(sdkOptions);
+  expect(stream._sensorManager).not.toBeNull();
+
+  const realDateNow = Date.now.bind(global.Date);
+  let fakeTime = realDateNow();
+  jest.spyOn(global.Date, "now").mockImplementation(() => fakeTime);
+
+  activate_sensor(stream, "acceleration");
+  activate_sensor(stream, "gyroscope");
+  window.dispatchEvent(
+    new DeviceMotionEvent("devicemotion", {
+      rotationRate: {
+        alpha: 8.0,
+        beta: 7.0,
+        gamma: 6.0,
+      },
+      accelerationIncludingGravity: { x: 1.0, y: 2.5, z: 3.0 },
+    }),
+  );
+
+  expect(snapshots.length).toEqual(2);
+  expect(snapshots[0].type).toEqual("sensor:event");
+  expect(snapshots[0].data).toEqual({
+    sensor: "acceleration",
+    x: 1.0,
+    y: 2.5,
+    z: 3.0,
+  });
+  expect(snapshots[1].type).toEqual("sensor:event");
+  expect(snapshots[1].data).toEqual({
+    sensor: "gyroscope",
+    x: 7.0,
+    y: 6.0,
+    z: 8.0,
+  });
+
+  // Advance 1 second
+  fakeTime += 1000;
+
+  // Deactivate acceleration sensor from the server side, which led to no more
+  // acceleration sensor data sent from the client side
+  deactivate_sensor(stream, "acceleration");
+  window.dispatchEvent(
+    new DeviceMotionEvent("devicemotion", {
+      rotationRate: {
+        alpha: 1.0,
+        beta: 1.0,
+        gamma: 1.0,
+      },
+      accelerationIncludingGravity: { x: 1.0, y: 1.5, z: 1.0 },
+    }),
+  );
+
+  expect(snapshots.length).toEqual(3);
+  expect(snapshots[2].type).toEqual("sensor:event");
+  expect(snapshots[2].data).toEqual({
+    sensor: "gyroscope",
+    x: 1.0,
+    y: 1.0,
+    z: 1.0,
+  });
+
+  // Advance 1 second
+  fakeTime += 1000;
+
+  activate_sensor(stream, "acceleration");
+  window.dispatchEvent(
+    new DeviceMotionEvent("devicemotion", {
+      rotationRate: {
+        alpha: 2.0,
+        beta: 2.0,
+        gamma: 2.0,
+      },
+      accelerationIncludingGravity: { x: 3.0, y: 3.5, z: 3.0 },
+    }),
+  );
+
+  expect(snapshots.length).toEqual(5);
+  expect(snapshots[3].type).toEqual("sensor:event");
+  expect(snapshots[3].data).toEqual({
+    sensor: "acceleration",
+    x: 3.0,
+    y: 3.5,
+    z: 3.0,
+  });
+  expect(snapshots[4].type).toEqual("sensor:event");
+  expect(snapshots[4].data).toEqual({
+    sensor: "gyroscope",
+    x: 2.0,
+    y: 2.0,
+    z: 2.0,
+  });
+
+  global.Date.now.mockRestore();
+});
+
 test("should not send sensor data within the update interval even if sensor data has changed", () => {
   sdkOptions.devices = {
     sensor: {
@@ -249,7 +404,7 @@ test("should not send sensor data within the update interval even if sensor data
   };
   let { stream, snapshots } = setupStream(sdkOptions);
   expect(stream._sensorManager).not.toBeNull();
-  stream._webrtcReady(null, null);
+  activate_sensor(stream, "gyroscope");
 
   const realDateNow = Date.now.bind(global.Date);
   let fakeTime = realDateNow();
@@ -262,6 +417,7 @@ test("should not send sensor data within the update interval even if sensor data
         beta: 7.0,
         gamma: 6.0,
       },
+      accelerationIncludingGravity: { x: 1.0, y: 2.5, z: 3.0 },
     }),
   );
 
@@ -292,6 +448,9 @@ test("should not send sensor data within the update interval even if sensor data
 
   // Advance 1 second
   fakeTime += 1000;
+
+  // Send the acceleration sensor data after it's activated
+  activate_sensor(stream, "acceleration");
 
   // Capture data from acceleration sensor
   window.dispatchEvent(
@@ -328,7 +487,9 @@ test("should send sensor data to Anbox container if all sensors are enabled", ()
   };
   let { stream, snapshots } = setupStream(sdkOptions);
   expect(stream._sensorManager).not.toBeNull();
-  stream._webrtcReady(null, null);
+
+  activate_sensor(stream, "gyroscope");
+  activate_sensor(stream, "acceleration");
 
   window.dispatchEvent(
     new DeviceMotionEvent("devicemotion", {
@@ -366,6 +527,7 @@ test("should send sensor data to Anbox container if all sensors are enabled", ()
   // Advance 1 second
   fakeTime += 1000;
 
+  activate_sensor(stream, "orientation");
   window.dispatchEvent(
     new DeviceOrientationEvent("deviceorientation", {
       alpha: 30.0,
@@ -411,8 +573,8 @@ test("should not not send sensor data when there are no changes", () => {
 
   let { stream, snapshots } = setupStream(sdkOptions);
   expect(stream._sensorManager).not.toBeNull();
-  stream._webrtcReady(null, null);
 
+  activate_sensor(stream, "gyroscope");
   const dispatch_event = () => {
     window.dispatchEvent(
       new DeviceMotionEvent("devicemotion", {

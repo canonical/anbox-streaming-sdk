@@ -75,6 +75,7 @@ function newError(msg, code) {
 }
 
 function _fuzzyCompare(n1, n2, precision = 0.000001) {
+  if (n1 === null && n2 === null) return true;
   if (n1 === null || n2 === null) return false;
   return Math.abs(n1 - n2) <= precision;
 }
@@ -236,6 +237,12 @@ class AnboxStream {
         enableAccelerometer: this._options.devices.sensor.enableAccelerometer,
         enableGyroscope: this._options.devices.sensor.enableGyroscope,
       });
+      this._webrtcManager.onSensorActivated(
+        this._sensorManager.onSensorActivated.bind(this._sensorManager),
+      );
+      this._webrtcManager.onSensorDeactivated(
+        this._sensorManager.onSensorDeactivated.bind(this._sensorManager),
+      );
     }
 
     // Control options
@@ -960,10 +967,6 @@ class AnboxStream {
     if (this._options.stream.audio && this._options.devices.speaker) {
       const audio = document.getElementById(this._audioID);
       audio.srcObject = audioSource;
-    }
-
-    if (this._sensorManager) {
-      this._sensorManager.start();
     }
 
     if (!this._options.stream.video && !this._options.stream.audio) {
@@ -2411,6 +2414,10 @@ class AnboxWebRTCManager {
     this._onVhalSetAnswerReceived = (data) => {};
     this._onConnectionEventReceived = () => {};
     this._onControlChannelOpen = () => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onSensorActivated = (data) => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onSensorDeactivated = (data) => {};
   }
 
   /**
@@ -2778,6 +2785,24 @@ class AnboxWebRTCManager {
   onVhalSetAnswerReceived(callback) {
     if (typeof callback === "function")
       this._onVhalSetAnswerReceived = callback;
+  }
+
+  /**
+   * Register a new callback which is fired when a sensor is activated
+   * on the control channel. This replaces the previous callback.
+   * @param callback {function} Function to use for the callback
+   */
+  onSensorActivated(callback) {
+    if (typeof callback === "function") this._onSensorActivated = callback;
+  }
+
+  /**
+   * Register a new callback which is fired when a sensor is deactivated
+   * on the control channel. This replaces the previous callback.
+   * @param callback {function} Function to use for the callback
+   */
+  onSensorDeactivated(callback) {
+    if (typeof callback === "function") this._onSensorDeactivated = callback;
   }
 
   /**
@@ -3153,6 +3178,18 @@ class AnboxWebRTCManager {
       case "vhal-set-answer":
         this._onVhalSetAnswerReceived(JSON.parse(msg.data));
         break;
+
+      case "activate-sensor": {
+        const sensor = JSON.parse(msg.data);
+        this._onSensorActivated(sensor.type);
+        break;
+      }
+
+      case "deactivate-sensor": {
+        const sensor = JSON.parse(msg.data);
+        this._onSensorDeactivated(sensor.type);
+        break;
+      }
 
       default:
         this._onMessage(msg.type, msg.data);
@@ -4506,8 +4543,8 @@ class AnboxSensorManager {
       enableGyroscope: options.enableGyroscope,
     };
 
-    this._isActive = false;
     this._lastUpdateTime = 0;
+    this._activeSensors = new Set();
 
     this.sensorData = {
       orientation: null,
@@ -4520,85 +4557,115 @@ class AnboxSensorManager {
     this._onSensorDataUpdate = this._onSensorDataUpdate.bind(this);
   }
 
-  /*
-   Start to capture sensor data
-   @returns {boolean} Whether the sensor data capture started successfully
-  */
-  start() {
-    if (this._isActive) return true;
+  /**
+   * Stop capturing sensor data
+   */
+  stop() {
+    for (const sensor of Array.from(this._activeSensors)) {
+      this.onSensorDeactivated(sensor);
+    }
 
-    try {
-      if (this._options.enableOrientation && window.DeviceOrientationEvent) {
+    this._activeSensors.clear();
+  }
+
+  onSensorActivated(sensor) {
+    if (!this._options.webrtcManager) return;
+    if (this._activeSensors.has(sensor)) return;
+
+    switch (sensor) {
+      case "orientation":
+        if (!this._options.enableOrientation) return;
+
+        if (!window.DeviceOrientationEvent) {
+          console.warn("Orientation sensor not supported on this device");
+          return;
+        }
+
+        this._activeSensors.add(sensor);
+        this.sensorData.orientation = {
+          roll: null,
+          pitch: null,
+          azimuth: null,
+        };
         window.addEventListener(
           "deviceorientation",
           this._onDeviceOrientation,
           false,
         );
-      } else if (this._options.enableOrientation) {
-        console.warn(
-          "AnboxSensorManager: orientation sensor not supported on this device",
-        );
-      }
+        break;
 
-      if (
-        (this._options.enableAccelerometer || this._options.enableGyroscope) &&
-        window.DeviceMotionEvent
-      ) {
-        window.addEventListener("devicemotion", this._onDeviceMotion, false);
-      } else if (
-        this._options.enableAccelerometer ||
-        this._options.enableGyroscope
-      ) {
-        console.warn(
-          "AnboxSensorManager: motion sensors not supported on this device",
-        );
-      }
+      case "acceleration":
+        if (!this._options.enableAccelerometer) return;
 
-      this._isActive = true;
-      return true;
-    } catch (error) {
-      console.error(
-        "AnboxSensorManager: failed to start capturing sensor data:",
-        error,
-      );
-      return false;
+        if (!window.DeviceMotionEvent) {
+          console.warn("Motion sensors not supported on this device");
+          return;
+        }
+
+        this._activeSensors.add(sensor);
+        this.sensorData.acceleration = { x: null, y: null, z: null };
+
+        if (!this._activeSensors.has("gyroscope")) {
+          window.addEventListener("devicemotion", this._onDeviceMotion, false);
+        }
+        break;
+      case "gyroscope":
+        if (!this._options.enableGyroscope) return;
+
+        if (!window.DeviceMotionEvent) {
+          console.warn("Motion sensors not supported on this device");
+          return;
+        }
+
+        this._activeSensors.add(sensor);
+        this.sensorData.gyroscope = { x: null, y: null, z: null };
+
+        if (!this._activeSensors.has("acceleration")) {
+          window.addEventListener("devicemotion", this._onDeviceMotion, false);
+        }
+        break;
+      default:
+        console.warn(`Unsupported sensor type: ${sensor}`);
     }
   }
 
-  /**
-   * Stop capturing sensor data
-   */
-  stop() {
-    if (!this._isActive) return;
+  onSensorDeactivated(sensor) {
+    if (!this._activeSensors.has(sensor)) return;
 
-    try {
-      if (window.DeviceOrientationEvent) {
+    switch (sensor) {
+      case "orientation":
+        this._activeSensors.delete(sensor);
         window.removeEventListener(
           "deviceorientation",
           this._onDeviceOrientation,
           false,
         );
-      }
+        this.sensorData.orientation = null;
+        break;
+      case "acceleration":
+      case "gyroscope":
+        this._activeSensors.delete(sensor);
+        if (sensor === "acceleration") this.sensorData.acceleration = null;
+        if (sensor === "gyroscope") this.sensorData.gyroscope = null;
 
-      if (window.DeviceMotionEvent) {
-        window.removeEventListener("devicemotion", this._onDeviceMotion, false);
-      }
-
-      this._isActive = false;
-    } catch (error) {
-      console.error(
-        "AnboxSensorManager: failed to stop capturing sensor data",
-        error,
-      );
+        // Remove the event listener only when both sensors are deactivated.
+        if (
+          !this._activeSensors.has("acceleration") &&
+          !this._activeSensors.has("gyroscope")
+        ) {
+          window.removeEventListener(
+            "devicemotion",
+            this._onDeviceMotion,
+            false,
+          );
+        }
+        break;
+      default:
+        console.warn(`Unsupported sensor type: ${sensor}`);
     }
   }
 
   _onDeviceOrientation(event) {
-    if (!this._options.enableOrientation) return;
-
-    if (!this.sensorData.orientation) {
-      this.sensorData.orientation = { roll: null, pitch: null, azimuth: null };
-    }
     const o = this.sensorData.orientation;
     const roll = event.beta;
     const pitch = event.gamma;
@@ -4624,10 +4691,7 @@ class AnboxSensorManager {
     // Prefer using accelerationIncludingGravity, which includes the effect of gravity,
     // fallback to acceleration if it's not available
     const acc = event.accelerationIncludingGravity || event.acceleration;
-    if (this._options.enableAccelerometer && acc) {
-      if (!this.sensorData.acceleration) {
-        this.sensorData.acceleration = { x: null, y: null, z: null };
-      }
+    if (this.sensorData.acceleration && acc) {
       const a = this.sensorData.acceleration;
       if (
         !_fuzzyCompare(a.x, acc.x) ||
@@ -4642,10 +4706,7 @@ class AnboxSensorManager {
     }
 
     const rot = event.rotationRate;
-    if (this._options.enableGyroscope && rot) {
-      if (!this.sensorData.gyroscope) {
-        this.sensorData.gyroscope = { x: null, y: null, z: null };
-      }
+    if (this.sensorData.gyroscope && rot) {
       const g = this.sensorData.gyroscope;
       if (
         !_fuzzyCompare(g.x, rot.beta) ||
