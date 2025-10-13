@@ -16,6 +16,7 @@
 
 ANBOX_STREAMING_SDK_DIR=$PWD/../../
 ESLINT_ARGS=
+FIX_MODE=false
 while [ -n "$1" ]; do
     case "$1" in
         --anbox-streaming-sdk-dir=*)
@@ -24,6 +25,7 @@ while [ -n "$1" ]; do
             ;;
         --fix)
             ESLINT_ARGS="$ESLINT_ARGS --fix"
+            FIX_MODE=true
             shift
             ;;
         *)
@@ -40,7 +42,16 @@ fi
 # Copy the JS SDK to the root dir of jtest so that
 # unit tests can be executed properly.
 cp $ANBOX_STREAMING_SDK_DIR/*.js ./
-trap 'rm -f anbox-stream-sdk.js' EXIT INT TERM
+
+cleanup() {
+    if [ "$FIX_MODE" = true ]; then
+        # In fix mode, copy the fixed sdk js files back to the original directory
+        cp anbox-stream-sdk.js "$ANBOX_STREAMING_SDK_DIR"/
+    fi
+    # Always remove the copied files from test directory
+    rm -f anbox-stream-sdk.js
+}
+trap cleanup EXIT INT TERM
 
 extra_args=
 if ! docker -v | grep -q podman ; then
