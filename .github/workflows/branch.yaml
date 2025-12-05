@@ -26,8 +26,8 @@ jobs:
         fetch-depth: 0
     - name: Create branch and bump version
       env:
-        AUTHOR_NAME: "Anbox Cloud CI Bot"
-        AUTHOR_EMAIL: "webops+anbox-cloud-ci-bot@canonical.com"
+        AUTHOR_NAME: "Anbox Bot"
+        AUTHOR_EMAIL: "anbox-bot@canonical.com"
         ANBOX_CLOUD_CI_BOT_SSH_KEY: ${{ secrets.ANBOX_CLOUD_CI_BOT_SSH_KEY }}
         GH_TOKEN: ${{ github.token }}
       run: |
