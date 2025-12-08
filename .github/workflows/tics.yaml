@@ -20,8 +20,8 @@ jobs:
     name: Run TICS quality scan
     runs-on: [self-hosted, linux, amd64, tiobe, jammy]
     steps:
-    - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
-    - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+    - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+    - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
       with:
         node-version: 24
 
@@ -31,7 +31,7 @@ jobs:
         echo "base_version=$(cat .base_version)" >> "$GITHUB_OUTPUT"
 
     - name: Setup Anbox Cloud
-      uses: canonical/anbox-cloud-github-action@ef0690184b1c8fd11e3385669726297bc2e3d368
+      uses: canonical/anbox-cloud-github-action@ac73782f4b581a69aa12650bda5eccc865cd038d
       with:
         channel: ${{ steps.config.outputs.base_version }}/edge
 
