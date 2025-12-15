@@ -32,7 +32,7 @@ jobs:
         ./scripts/run-tests.sh
 
     - name: Collect artifacts
-      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
       with:
         name: anbox-streaming-sdk_${{ steps.get-version.outputs.version }}
         if-no-files-found: error
@@ -79,7 +79,7 @@ jobs:
         amc config set container.security_updates false
 
     - name: Restore cached images
-      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
       with:
         path: images
         key: anbox-images-amd64
@@ -133,7 +133,7 @@ jobs:
           fi
         done
 
-    - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+    - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
       if: always()
       with:
         name: test-data-${{ steps.datetime.outputs.datetime }}
