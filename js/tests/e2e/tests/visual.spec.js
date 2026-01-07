@@ -82,12 +82,7 @@ const longPressHome = async (page) => {
   await expect(page).toHaveScreenshot("long-press-home.png", OPTIONS);
 };
 
-test("AOSP visual tests: touch and keyboard input", async ({ browser }) => {
-  // Since Playwright does not support mobile gestures like the swipe one, we
-  // need to give up touch for this test, and use regular mouse events instead
-  const context = await browser.newContext({ hasTouch: false });
-  const page = await context.newPage();
-
+test("AOSP visual tests: touch and keyboard input", async ({ page }) => {
   await joinSession(page, process.env.AOSP_SESSION_ID);
   await tapHomeButton(page);
 
@@ -99,23 +94,13 @@ test("AOSP visual tests: touch and keyboard input", async ({ browser }) => {
   await disconnectStream(page);
 });
 
-test("AOSP visual tests: long press input", async ({ browser }) => {
-  // Since Playwright does not support long press using the tap() method, we
-  // need to give up touch for this test, and use regular click events instead
-  const context = await browser.newContext({ hasTouch: false });
-  const page = await context.newPage();
-
+test("AOSP visual tests: long press input", async ({ page }) => {
   await joinSession(page, process.env.AOSP_SESSION_ID);
   await longPressHome(page);
   await disconnectStream(page);
 });
 
-test("AOSP visual tests: swipe", async ({ browser }) => {
-  // Since Playwright does not support mobile gestures like the swipe one, we
-  // need to give up touch for this test, and use regular mouse events instead
-  const context = await browser.newContext({ hasTouch: false });
-  const page = await context.newPage();
-
+test("AOSP visual tests: swipe", async ({ page }) => {
   await joinSession(page, process.env.AOSP_SESSION_ID);
   await swipeVertically(page, "openStatusBar");
   // Wait 1s (system UI expand animation)
