@@ -41,7 +41,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
+  /* Opt out of parallel tests */
   workers: 1,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI ? "html" : "line",
@@ -60,7 +60,7 @@ export default defineConfig({
     {
       name: "chromium",
       use: {
-        ...devices["Desktop Chrome"],
+        ...devices["Mobile Chrome"],
         ...SHARED_BROWSER_OPTIONS,
       },
     },
@@ -68,7 +68,7 @@ export default defineConfig({
     {
       name: "firefox",
       use: {
-        ...devices["Desktop Firefox"],
+        ...devices["Mobile Firefox"],
         ...SHARED_BROWSER_OPTIONS,
         // on Firefox, the picture-in-picture video toggle overlaps the video
         // element, so we need to disable it to avoid it getting in the way
