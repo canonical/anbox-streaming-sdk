@@ -136,7 +136,7 @@ app.post("/application", async (req, res) => {
   const appName = req.query.name;
   const imageName = appName.endsWith("AAOS")
     ? "jammy:aaos15"
-    : "jammy:android14";
+    : "jammy:android15";
   const manifestJson = {
     name: appName,
     image: `${imageName}:${await getArch()}`,
