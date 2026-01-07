@@ -19,7 +19,7 @@ jobs:
         image_server_url=https://"${{ secrets.IMAGE_SERVER_AUTH }}"@images.anbox-cloud.io/"$IMAGE_SERVER_BUCKET"/"$channel"
         item_type=image
 
-        for product in android15 android14 aaos15 ; do
+        for product in android15 aaos15 ; do
           image_name=jammy:"$product":amd64
           image_path="$(curl -s "$image_server_url"/streams/v1/images.json | \
             jq -r "last(.products.\"$image_name\".versions[] | select(.items.\"${item_type}\" != null)).items.\"${item_type}\".path")"
