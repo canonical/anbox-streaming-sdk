@@ -26,7 +26,7 @@ runs:
 
   - name: Restore trivy deb from cache
     id: cache_deb
-    uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+    uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
     with:
       key: ${{ steps.cache_keys.outputs.deb }}
       path: ${{ github.workspace }}/trivy.deb
@@ -52,7 +52,7 @@ runs:
 
   - name: Restore trivy db from cache
     id: cache_db
-    uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+    uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
     with:
       key: ${{ steps.cache_keys.outputs.db }}
       path: ${{ github.workspace }}/.cache/trivy
@@ -89,7 +89,7 @@ runs:
 
   - name: Restore KEV list from cache
     id: cache_kev
-    uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+    uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
     with:
       key: ${{ steps.cache_keys.outputs.kev }}
       path: ${{ github.workspace }}/kev.json
