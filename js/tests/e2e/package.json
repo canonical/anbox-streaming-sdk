@@ -24,7 +24,7 @@
     "v8-to-istanbul": "9.3.0"
   },
   "dependencies": {
-    "axios": "1.12.2",
+    "axios": "1.13.5",
     "compressing": "1.10.1",
     "dotenv": "16.4.7",
     "express": "4.22.1",
