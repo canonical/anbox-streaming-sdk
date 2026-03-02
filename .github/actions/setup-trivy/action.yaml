@@ -36,9 +36,9 @@ runs:
   - name: Fetch debian package for Trivy
     if: ${{ steps.cache_deb.outputs.cache-hit != 'true' }}
     env:
-      TRIVY_VERSION: "0.57.0"
+      TRIVY_VERSION: "0.69.2"
       TRIVY_ARCH: ${{ inputs.arch == 'amd64' && '64bit' || 'ARM64' }}
-      TRIVY_SHA256: ${{ inputs.arch == 'amd64' && '0ef038ae7078449b89af6dcdd1cdecd744f65b8b50432797cda78846448c62dd' || '8ae7a057a32d98818c8504c2484017598437e117b9c96858d5749942c99cf1dd' }}
+      TRIVY_SHA256: ${{ inputs.arch == 'amd64' && '7052fdc858e5381e28abe42330115da1703015a3ab172d8312b099defe85107e' || 'c49d3ba0cd6eb0c3d50fb4372f37c3328ac10475862286ddb68faea0bb32775c' }}
     shell: bash
     run: |
       curl -L -o trivy.deb \
