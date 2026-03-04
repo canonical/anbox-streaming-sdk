@@ -38,7 +38,7 @@ runs:
     env:
       TRIVY_VERSION: "0.69.2"
       TRIVY_ARCH: ${{ inputs.arch == 'amd64' && '64bit' || 'ARM64' }}
-      TRIVY_SHA256: ${{ inputs.arch == 'amd64' && '7052fdc858e5381e28abe42330115da1703015a3ab172d8312b099defe85107e' || 'c49d3ba0cd6eb0c3d50fb4372f37c3328ac10475862286ddb68faea0bb32775c' }}
+      TRIVY_SHA256: ${{ inputs.arch == 'amd64' && '7052fdc858e5381e28abe42330115da1703015a3ab172d8312b099defe85107e' || '2522ff3915d7055229d50ad91cdb77c7577cd13d94bb0e4e2688f3d8471ff81b' }}
     shell: bash
     run: |
       curl -L -o trivy.deb \
