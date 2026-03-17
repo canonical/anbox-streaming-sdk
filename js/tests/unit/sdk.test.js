@@ -195,20 +195,14 @@ test("call methods before connecting", () => {
   expect(() => stream.disconnect()).not.toThrow();
 });
 
-test("rotation calculations are correct", () => {
-  const s = new AnboxStream(sdkOptions);
-
-  expect(() => s._orientationToDegrees("invalid", "invalid")).toThrow();
-  expect(s._orientationToDegrees("portrait", "portrait")).toEqual(0);
-  expect(s._orientationToDegrees("portrait", "landscape")).toEqual(90);
-  expect(s._orientationToDegrees("portrait", "reverse-portrait")).toEqual(180);
-  expect(s._orientationToDegrees("portrait", "reverse-landscape")).toEqual(270);
-
-  expect(s._orientationToDegrees("reverse-landscape", "portrait")).toEqual(90);
-});
-
 test("video element should take all available space", () => {
   const stream = new AnboxStream(sdkOptions);
+
+  stream._webrtcManager = {
+    _isControlChannelOpen: true,
+    sendControlMessage: jest.fn(),
+    stop: jest.fn(),
+  };
 
   const video = document.createElement("video");
   video.id = stream._videoID;
@@ -226,9 +220,20 @@ test("video element should take all available space", () => {
   expect(dimensions.playerHeight).toEqual(2000);
 
   // Perform a rotation
-  stream._currentRotation = 90;
-  stream._onResize();
+  expect(stream.rotate(90)).toEqual(true);
   dimensions = stream._dimensions;
+
+  expect(video.style.transform).toEqual("rotate(90deg)");
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: -9.81,
+      y: 0,
+      z: 0,
+    },
+  );
+  expect(stream.getCurrentRotation()).toEqual(90);
   expect(dimensions.playerWidth).toEqual(2000);
   expect(dimensions.playerHeight).toEqual(1000);
 
@@ -241,6 +246,11 @@ test("rotate video element", () => {
     stream._webrtcManager.sendControlMessage = jest.fn(() => {
       return true;
     });
+    stream._webrtcManager = {
+      _isControlChannelOpen: true,
+      sendControlMessage: jest.fn(),
+      stop: jest.fn(),
+    };
 
     const video = document.createElement("video");
     video.id = stream._videoID;
@@ -265,22 +275,20 @@ test("rotate video element", () => {
     }
 
     stream._onResize();
-    expect(stream.getCurrentOrientation()).toEqual("portrait");
+    expect(stream.getCurrentRotation()).toEqual(0);
 
-    stream.rotate("landscape");
-
-    expect(visualElement.style.transform).toEqual("rotate(90deg)");
-    expect(stream._webrtcManager.sendControlMessage.mock.calls.length).toEqual(
-      1,
+    expect(stream.rotate(-90)).toEqual(true);
+    expect(visualElement.style.transform).toEqual("rotate(270deg)");
+    expect(stream._webrtcManager.sendControlMessage).toHaveBeenCalledWith(
+      "sensor:event",
+      {
+        sensor: "acceleration",
+        x: 9.81,
+        y: 0,
+        z: 0,
+      },
     );
-    expect(stream._webrtcManager.sendControlMessage.mock.calls[0][0]).toEqual(
-      "screen::change_orientation",
-    );
-    expect(stream._webrtcManager.sendControlMessage.mock.calls[0][1]).toEqual({
-      orientation: "landscape",
-    });
-    expect(stream.getCurrentOrientation()).toEqual("landscape");
-
+    expect(stream.getCurrentRotation()).toEqual(270);
     expect(() => stream.disconnect()).not.toThrow();
   };
 
@@ -337,7 +345,7 @@ test("stop webrtc manager properly", (done) => {
   container.__defineGetter__("clientHeight", () => 1000);
   container.appendChild(video);
   stream._onResize();
-  expect(stream.getCurrentOrientation()).toEqual("portrait");
+  expect(stream.getCurrentRotation()).toEqual(0);
 
   // The registered events listener should be removed
   // when disconnecting the stream.
@@ -501,4 +509,46 @@ test("player respects the vertical aligment settings", () => {
     }
     expect(dimensions.playerOffsetTop).toEqual(expectedOffsetTop);
   }
+});
+
+test("rotate for invalid degree inputs", () => {
+  const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+  const stream = new AnboxStream(sdkOptions);
+  expect(stream.rotate(45)).toEqual(false);
+  expect(stream.rotate("str")).toEqual(false);
+  expect(errSpy).toHaveBeenCalledWith(
+    "Invalid rotation degree: 45. Must be a multiple of 90.",
+  );
+  expect(errSpy).toHaveBeenCalledWith(
+    "Invalid rotation degree: str. Must be a multiple of 90.",
+  );
+  errSpy.mockRestore();
+});
+
+test("rotate when control channel is not open", () => {
+  const stream = new AnboxStream(sdkOptions);
+  expect(stream.rotate(90)).toEqual(false);
+  stream._webrtcManager = {
+    _isControlChannelOpen: false,
+    sendControlMessage: jest.fn(),
+  };
+  expect(stream.rotate(90)).toEqual(false);
+  expect(stream._webrtcManager.sendControlMessage).not.toHaveBeenCalled();
+  expect(stream.getCurrentRotation()).toEqual(0);
+});
+
+test("can not rotate if the accelerometer sensor is enabled", () => {
+  const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+  sdkOptions.devices = {
+    sensor: {
+      enableAccelerometer: true,
+    },
+  };
+  const stream = new AnboxStream(sdkOptions);
+  expect(stream.rotate(90)).toEqual(false);
+  expect(errSpy).toHaveBeenCalledWith(
+    "Cannot manual rotate: 'devices.sensor.enableAccelerometer' is enabled. " +
+      "Real-time sensor data would conflict with manual rotation.",
+  );
+  errSpy.mockRestore();
 });

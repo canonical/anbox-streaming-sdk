@@ -251,8 +251,7 @@ class AnboxStream {
     this._gamepadManager = null;
     this._streamCanvas = null;
 
-    this._originalOrientation = null;
-    this._currentRotation = 0;
+    this._currentRotationDegrees = 0;
     this._primaryTouchId = 0;
     this._pointersOutofBounds = {};
     this._activeTouchPointers = [];
@@ -1129,76 +1128,70 @@ class AnboxStream {
   }
 
   /**
-   * Calculate how many degrees we should rotate to go from the original orientation to the desired one
+   * Rotates the video element to a specific absolute degree.
+   * * @param {number} degrees - The target absolute angle. Must be a multiple of 90 (e.g., -270, -90, 0, 180, 360).
+   * * @note
+   * 1. This value represents absolute degrees relative to the initial video orientation
+   * established when the session is first created regardless of whether the Android
+   * container is in portrait or landscape mode at startup, the initial degrees is always
+   * defined as 0. Since this is an absolute coordinate system, it is the
+   * caller's responsibility to provide the final target angle rather than a relative degree
+   * from the current rotation.
+   * 2. If the 'enableAccelerometer' option is enabled in the SDK configuration,
+   * real-time sensor data from the client device will conflict with this function,
+   * causing the rotation to be overridden or fail. Ensure manual rotation and
+   * automatic accelerometer streaming are not used simultaneously.
+   * @returns {boolean} Returns true if the video element is rotated successfully, otherwise returns false.
    */
-  _orientationToDegrees(startingOrientation, desiredOrientation) {
-    const orientations = [
-      "portrait",
-      "landscape",
-      "reverse-portrait",
-      "reverse-landscape",
-    ];
-    const currentPos = orientations.indexOf(startingOrientation);
-    const desiredPos = orientations.indexOf(desiredOrientation);
-    if (currentPos === -1 || desiredPos === -1) {
-      throw newError(
-        "invalid orientation given",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT,
+  rotate(degrees) {
+    if (typeof degrees !== "number" || degrees % 90 !== 0) {
+      console.error(
+        `Invalid rotation degree: ${degrees}. Must be a multiple of 90.`,
       );
+      return false;
     }
-    let requiredTurns = desiredPos - currentPos;
-    return requiredTurns * 90 - 360 * Math.floor(requiredTurns / 360);
-  }
 
-  /**
-   * rotate the video element to a given orientation
-   * @param orientation {string} Desired orientation. Can be 'portrait', 'landscape', 'reverse-portrait', 'reverse-landscape'
-   *                             No-op if already in the given orientation
-   * Returns true if the video element is rotated successfully, otherwise returns false
-   * @returns {boolean}
-   */
-  rotate(orientation) {
-    switch (orientation) {
-      case "portrait":
-      case "landscape":
-      case "reverse-portrait":
-      case "reverse-landscape":
+    if (this._options.devices.sensor.enableAccelerometer) {
+      console.error(
+        "Cannot manual rotate: 'devices.sensor.enableAccelerometer' is enabled. " +
+          "Real-time sensor data would conflict with manual rotation.",
+      );
+      return false;
+    }
+
+    if (!this._webrtcManager || !this._webrtcManager._isControlChannelOpen) {
+      return false;
+    }
+
+    const normalized = ((degrees % 360) + 360) % 360;
+    if (this._currentRotationDegrees === normalized) {
+      console.log(`Already at ${normalized} degrees, skipping rotation.`);
+      return true;
+    }
+    this._currentRotationDegrees = normalized;
+
+    let accelData;
+    const g = 9.81;
+    switch (this._currentRotationDegrees) {
+      case 90:
+        accelData = { x: -g, y: 0, z: 0 };
         break;
+      case 180:
+        accelData = { x: 0, y: -g, z: 0 };
+        break;
+      case 270:
+        accelData = { x: g, y: 0, z: 0 };
+        break;
+      case 0:
       default:
-        console.error("invalid orientation given");
-        return false;
+        accelData = { x: 0, y: g, z: 0 };
+        break;
     }
-
-    const dim = this._dimensions;
-    if (!dim) {
-      console.error("SDK not ready");
-      return false;
-    }
-
-    if (orientation === this._currentOrientation) {
-      console.log(
-        "video element already in requested orientation",
-        orientation,
-      );
-      return false;
-    }
-
-    const data = { orientation: orientation };
-    if (
-      !this._webrtcManager.sendControlMessage(
-        "screen::change_orientation",
-        data,
-      )
-    ) {
-      console.error("failed to send orientation message");
-      return false;
-    }
-
-    this._currentOrientation = orientation;
-    this._currentRotation = this._orientationToDegrees(
-      this._originalOrientation,
-      orientation,
-    );
+    const data = {
+      sensor: "acceleration",
+      ...accelData,
+    };
+    this._webrtcManager.sendControlMessage("sensor:event", data);
 
     let visualElement;
     if (this._options.experimental.upscaling.enabled) {
@@ -1206,13 +1199,14 @@ class AnboxStream {
     } else {
       visualElement = document.getElementById(this._videoID);
     }
-    visualElement.style.transform = `rotate(${this._currentRotation}deg)`;
+    visualElement.style.transform = `rotate(${this._currentRotationDegrees}deg)`;
     this._onResize();
+
     return true;
   }
 
-  getCurrentOrientation() {
-    return this._currentOrientation;
+  getCurrentRotation() {
+    return this._currentRotationDegrees;
   }
 
   _onResize() {
@@ -1234,7 +1228,7 @@ class AnboxStream {
       container.clientWidth - getPadding("left") - getPadding("right");
 
     // Handle rotation
-    switch (this._currentRotation) {
+    switch (this._currentRotationDegrees) {
       case 0:
       case 180:
         break;
@@ -1267,7 +1261,7 @@ class AnboxStream {
     }
 
     let offsetTop;
-    switch (this._currentRotation) {
+    switch (this._currentRotationDegrees) {
       case 0:
       case 180:
         visualElement.style.height = playerHeight.toString() + "px";
@@ -1311,13 +1305,6 @@ class AnboxStream {
           "unhandled rotation",
           ANBOX_STREAM_SDK_ERROR_NOT_SUPPORTED,
         );
-    }
-
-    // Initialize basic orientation
-    if (this._originalOrientation === null) {
-      if (playerWidth > playerHeight) this._originalOrientation = "landscape";
-      else this._originalOrientation = "portrait";
-      this._currentOrientation = this._originalOrientation;
     }
 
     // The visual offset is always derived from the same formula, no matter the orientation.
@@ -1763,15 +1750,15 @@ class AnboxStream {
       throw newError("sdk is not ready yet", ANBOX_STREAM_SDK_ERROR_INTERNAL);
     }
 
-    if (this._currentRotation === 0) return { x: x, y: y };
+    if (this._currentRotationDegrees === 0) return { x: x, y: y };
 
-    let radians = (Math.PI / 180) * this._currentRotation,
+    let radians = (Math.PI / 180) * this._currentRotationDegrees,
       cos = Math.cos(radians),
       sin = Math.sin(radians),
       nx = Math.round(cos * x + sin * y),
       ny = Math.round(cos * y - sin * x);
 
-    switch (this._currentRotation) {
+    switch (this._currentRotationDegrees) {
       case 90:
         ny += dim.playerWidth;
         break;
