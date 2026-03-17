@@ -74,26 +74,77 @@ beforeEach(() => {
 
 test("rotated touch events are properly translated", () => {
   let stream = setupStream(sdkOptions);
+  stream._webrtcManager = {
+    _isControlChannelOpen: true,
+    sendControlMessage: jest.fn(),
+    stop: jest.fn(),
+  };
 
+  const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
   stream._dimensions = { playerWidth: 500, playerHeight: 1000 };
-  stream._currentRotation = 0;
+  expect(stream.rotate(0)).toEqual(true);
   let coord = stream._convertTouchInput(0, 0);
   expect(coord).toEqual({ x: 0, y: 0 });
+  // Should skip sending the message since the current rotation is already 0 degrees
+  expect(stream._webrtcManager.sendControlMessage).not.toHaveBeenCalled();
+  expect(logSpy).toHaveBeenCalledWith(
+    "Already at 0 degrees, skipping rotation.",
+  );
+  logSpy.mockRestore();
 
   stream._dimensions = { playerWidth: 1000, playerHeight: 500 };
-  stream._currentRotation = 90;
+  expect(stream.rotate(90)).toEqual(true);
   coord = stream._convertTouchInput(1000, 0);
-  expect(coord).toEqual({ x: 0, y: 0 });
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: -9.81,
+      y: 0,
+      z: 0,
+    },
+  );
 
   stream._dimensions = { playerWidth: 500, playerHeight: 1000 };
-  stream._currentRotation = 180;
+  expect(stream.rotate(180)).toEqual(true);
   coord = stream._convertTouchInput(500, 1000);
-  expect(coord).toEqual({ x: 0, y: 0 });
+  expect(coord).toEqual({ x: 500, y: 1000 });
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 0,
+      y: -9.81,
+      z: 0,
+    },
+  );
 
   stream._dimensions = { playerWidth: 1000, playerHeight: 500 };
-  stream._currentRotation = 270;
+  expect(stream.rotate(270)).toEqual(true);
   coord = stream._convertTouchInput(0, 500);
-  expect(coord).toEqual({ x: 0, y: 0 });
+  expect(coord).toEqual({ x: 500, y: 0 });
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 9.81,
+      y: 0,
+      z: 0,
+    },
+  );
+
+  expect(stream.rotate(360)).toEqual(true);
+  coord = stream._convertTouchInput(0, 500);
+  expect(coord).toEqual({ x: 0, y: 500 });
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 0,
+      y: 9.81,
+      z: 0,
+    },
+  );
 });
 
 test("can process keyboard events", () => {
@@ -432,6 +483,11 @@ test("can process invalid touch events", () => {
 
 test("mouse move when rotated", () => {
   let stream = setupStream(sdkOptions);
+  stream._webrtcManager = {
+    _isControlChannelOpen: true,
+    sendControlMessage: jest.fn(),
+    stop: jest.fn(),
+  };
 
   let mockFn = jest.fn(() => {
     return true;
@@ -454,7 +510,7 @@ test("mouse move when rotated", () => {
   expect(mockFn.mock.calls[0][0]).toEqual("input::mouse-move");
   expect(mockFn.mock.calls[0][1]).toEqual({ x: 500, y: 1000, rx: 25, ry: 50 });
 
-  expect(stream.rotate("reverse-landscape")).toEqual(true);
+  expect(stream.rotate(-90)).toEqual(true);
   event = new PointerEvent("pointermove", {
     clientX: 0,
     clientY: 1500,
@@ -466,7 +522,7 @@ test("mouse move when rotated", () => {
   expect(mockFn.mock.calls[2][0]).toEqual("input::mouse-move");
   expect(mockFn.mock.calls[2][1]).toEqual({ x: 0, y: 500, rx: 25, ry: 50 });
 
-  expect(stream.rotate("reverse-portrait")).toEqual(true);
+  expect(stream.rotate(-180)).toEqual(true);
   event = new PointerEvent("pointermove", {
     clientX: 1500,
     clientY: 2000,
@@ -478,7 +534,7 @@ test("mouse move when rotated", () => {
   expect(mockFn.mock.calls[4][0]).toEqual("input::mouse-move");
   expect(mockFn.mock.calls[4][1]).toEqual({ x: 500, y: 1000, rx: 25, ry: 50 });
 
-  expect(stream.rotate("landscape")).toEqual(true);
+  expect(stream.rotate(90)).toEqual(true);
   event = new PointerEvent("pointermove", {
     clientX: 0,
     clientY: 1500,
@@ -493,6 +549,11 @@ test("mouse move when rotated", () => {
 
 test("mouse move when rotated and translated to touch events", () => {
   let stream = setupStream(sdkOptions);
+  stream._webrtcManager = {
+    _isControlChannelOpen: true,
+    sendControlMessage: jest.fn(),
+    stop: jest.fn(),
+  };
 
   let mockFn = jest.fn(() => {
     return true;
@@ -532,7 +593,7 @@ test("mouse move when rotated and translated to touch events", () => {
   expect(mockFn.mock.calls[1][0]).toEqual("input::touch-move");
   expect(mockFn.mock.calls[1][1]).toEqual({ x: 500, y: 1000, id: 0 });
 
-  expect(stream.rotate("reverse-landscape")).toEqual(true);
+  expect(stream.rotate(90)).toEqual(true);
   event = new PointerEvent("pointermove", {
     clientX: 0,
     clientY: 1500,
@@ -543,9 +604,9 @@ test("mouse move when rotated and translated to touch events", () => {
   event.__defineGetter__("movementY", () => 100);
   container.dispatchEvent(event);
   expect(mockFn.mock.calls[3][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[3][1]).toEqual({ x: 0, y: 0, id: 0 });
+  expect(mockFn.mock.calls[3][1]).toEqual({ x: 500, y: 1000, id: 0 });
 
-  expect(stream.rotate("reverse-portrait")).toEqual(true);
+  expect(stream.rotate(180)).toEqual(true);
   event = new PointerEvent("pointermove", {
     clientX: 1500,
     clientY: 2000,
@@ -558,7 +619,7 @@ test("mouse move when rotated and translated to touch events", () => {
   expect(mockFn.mock.calls[5][0]).toEqual("input::touch-move");
   expect(mockFn.mock.calls[5][1]).toEqual({ x: 0, y: 0, id: 0 });
 
-  expect(stream.rotate("landscape")).toEqual(true);
+  expect(stream.rotate(-90)).toEqual(true);
   event = new PointerEvent("pointermove", {
     clientX: 2000,
     clientY: 500,
@@ -569,11 +630,16 @@ test("mouse move when rotated and translated to touch events", () => {
   event.__defineGetter__("movementY", () => 100);
   container.dispatchEvent(event);
   expect(mockFn.mock.calls[7][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[7][1]).toEqual({ x: 0, y: 0, id: 0 });
+  expect(mockFn.mock.calls[7][1]).toEqual({ x: 500, y: 1000, id: 0 });
 });
 
 test("touch events when rotated", () => {
   let stream = setupStream(sdkOptions);
+  stream._webrtcManager = {
+    _isControlChannelOpen: true,
+    sendControlMessage: jest.fn(),
+    stop: jest.fn(),
+  };
 
   let mockFn = jest.fn(() => {
     return true;
@@ -595,7 +661,7 @@ test("touch events when rotated", () => {
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
   expect(mockFn.mock.calls[0][1]).toEqual({ id: 0, x: 500, y: 1000 });
 
-  expect(stream.rotate("reverse-landscape")).toEqual(true);
+  expect(stream.rotate(90)).toEqual(true);
   container.dispatchEvent(
     new PointerEvent("pointermove", {
       pointerId: 0,
@@ -605,9 +671,9 @@ test("touch events when rotated", () => {
     }),
   );
   expect(mockFn.mock.calls[2][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[2][1]).toEqual({ id: 0, x: 500, y: 1000 });
+  expect(mockFn.mock.calls[2][1]).toEqual({ id: 0, x: 0, y: 0 });
 
-  expect(stream.rotate("reverse-portrait")).toEqual(true);
+  expect(stream.rotate(180)).toEqual(true);
   container.dispatchEvent(
     new PointerEvent("pointermove", {
       pointerId: 0,
@@ -621,7 +687,7 @@ test("touch events when rotated", () => {
   // available pointer Id being passed to the Android container
   expect(mockFn.mock.calls[4][1]).toEqual({ id: 0, x: 500, y: 1000 });
 
-  expect(stream.rotate("landscape")).toEqual(true);
+  expect(stream.rotate(270)).toEqual(true);
   container.dispatchEvent(
     new PointerEvent("pointermove", {
       pointerId: 0,
@@ -631,7 +697,7 @@ test("touch events when rotated", () => {
     }),
   );
   expect(mockFn.mock.calls[6][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[6][1]).toEqual({ id: 0, x: 500, y: 1000 });
+  expect(mockFn.mock.calls[6][1]).toEqual({ id: 0, x: 0, y: 0 });
 });
 
 test("single touch events with increment id", () => {
@@ -938,6 +1004,7 @@ test("control channel is closed when rotate a pointer event", () => {
   let mockFn = jest.fn(() => {
     return false;
   });
+  stream._webrtcManager._isControlChannelOpen = false;
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
@@ -956,5 +1023,5 @@ test("control channel is closed when rotate a pointer event", () => {
   expect(mockFn.mock.calls[0][0]).toEqual("input::mouse-move");
   expect(mockFn.mock.calls[0][1]).toEqual({ x: 500, y: 1000, rx: 25, ry: 50 });
 
-  expect(stream.rotate("reverse-landscape")).toEqual(false);
+  expect(stream.rotate(90)).toEqual(false);
 });
