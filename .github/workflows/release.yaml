@@ -28,8 +28,10 @@ jobs:
         fetch-depth: 0
 
     - name: Build
+      env:
+        TAG_NAME: ${{ inputs.tag_name }}
       run: |
-        ./scripts/build.sh --create-tarball --version=${{ inputs.tag_name }}
+        ./scripts/build.sh --create-tarball --version="${TAG_NAME}"
 
     - name: Run tests
       run: |
@@ -38,9 +40,11 @@ jobs:
     - name: Release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TARGET: ${{ inputs.target_commitish || github.ref }}
       run: |
-        gh release create "${{ inputs.tag_name }}" \
-          anbox-streaming-sdk_${{ inputs.tag_name }}.zip \
-          --target "${{ inputs.target_commitish || github.ref }}" \
-          --title "${{ inputs.tag_name }}" \
-          --notes "See https://documentation.ubuntu.com/anbox-cloud/reference/release-notes/${{ inputs.tag_name }}/ for more information."
+        gh release create "${TAG_NAME}" \
+          "anbox-streaming-sdk_${TAG_NAME}.zip" \
+          --target "${TARGET}" \
+          --title "${TAG_NAME}" \
+          --notes "See https://documentation.ubuntu.com/anbox-cloud/reference/release-notes/${TAG_NAME}/ for more information."

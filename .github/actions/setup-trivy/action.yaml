@@ -18,10 +18,12 @@ runs:
   - name: Calculate cache keys
     shell: bash
     id: cache_keys
+    env:
+      ARCH: ${{ inputs.arch }}
     run: |
       date="$(date +'%Y-%m-%d')"
-      echo "db=trivy-db-${{ inputs.arch }}-${date}" >> $GITHUB_OUTPUT
-      echo "deb=trivy-deb-${{ inputs.arch }}-${date}" >> $GITHUB_OUTPUT
+      echo "db=trivy-db-${ARCH}-${date}" >> $GITHUB_OUTPUT
+      echo "deb=trivy-deb-${ARCH}-${date}" >> $GITHUB_OUTPUT
       echo "kev=kev-list-${date}" >> $GITHUB_OUTPUT
 
   - name: Restore trivy deb from cache
@@ -65,9 +67,10 @@ runs:
     env:
       ORAS_VERSION: "1.2.0"
       ORAS_SHA256: ${{ inputs.arch == 'amd64' && '5b3f1cbb86d869eee68120b9b45b9be983f3738442f87ee5f06b00edd0bab336' || '27df680a39fc2fcedc549cb737891623bc696c9a92a03fd341e9356a35836bae' }}
+      ARCH: ${{ inputs.arch }}
     run: |
       curl -L -o oras.tar.gz \
-        https://github.com/oras-project/oras/releases/download/v"${ORAS_VERSION}"/oras_"${ORAS_VERSION}"_linux_${{ inputs.arch }}.tar.gz
+        https://github.com/oras-project/oras/releases/download/v"${ORAS_VERSION}"/oras_"${ORAS_VERSION}"_linux_${ARCH}.tar.gz
       echo "$ORAS_SHA256 oras.tar.gz" | sha256sum --check --status
       tar xf oras.tar.gz oras
       chmod +x ./oras
