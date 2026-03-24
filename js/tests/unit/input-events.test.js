@@ -80,17 +80,19 @@ test("rotated touch events are properly translated", () => {
     stop: jest.fn(),
   };
 
-  const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
   stream._dimensions = { playerWidth: 500, playerHeight: 1000 };
   expect(stream.rotate(0)).toEqual(true);
   let coord = stream._convertTouchInput(0, 0);
   expect(coord).toEqual({ x: 0, y: 0 });
-  // Should skip sending the message since the current rotation is already 0 degrees
-  expect(stream._webrtcManager.sendControlMessage).not.toHaveBeenCalled();
-  expect(logSpy).toHaveBeenCalledWith(
-    "Already at 0 degrees, skipping rotation.",
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 0,
+      y: 9.81,
+      z: 0,
+    },
   );
-  logSpy.mockRestore();
 
   stream._dimensions = { playerWidth: 1000, playerHeight: 500 };
   expect(stream.rotate(90)).toEqual(true);

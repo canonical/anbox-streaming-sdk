@@ -298,6 +298,142 @@ test("rotate video element", () => {
   test_video_rotation(sdkOptions);
 });
 
+test("rotate supports legacy orientation strings", () => {
+  const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+  const stream = new AnboxStream(sdkOptions);
+  stream._webrtcManager = {
+    _isControlChannelOpen: true,
+    sendControlMessage: jest.fn(),
+    stop: jest.fn(),
+  };
+
+  const video = document.createElement("video");
+  video.id = stream._videoID;
+  video.__defineGetter__("videoWidth", () => 500);
+  video.__defineGetter__("videoHeight", () => 1000);
+
+  const container = document.getElementById(sdkOptions.targetElement);
+  container.__defineGetter__("clientWidth", () => 1000);
+  container.__defineGetter__("clientHeight", () => 1000);
+  container.appendChild(video);
+
+  stream._onResize();
+
+  // null original orientation should not work for string-based rotations
+  stream._originalOrientation = null;
+  expect(stream.rotate("portrait")).toEqual(false);
+  expect(errSpy).toHaveBeenCalledWith("Invalid original orientation: null");
+
+  // portrait origin mapping
+  stream._originalOrientation = "portrait";
+
+  expect(stream.rotate("landscape")).toEqual(true);
+  expect(stream.getCurrentRotation()).toEqual(90);
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: -9.81,
+      y: 0,
+      z: 0,
+    },
+  );
+
+  expect(stream.rotate("reverse-portrait")).toEqual(true);
+  expect(stream.getCurrentRotation()).toEqual(180);
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 0,
+      y: -9.81,
+      z: 0,
+    },
+  );
+
+  expect(stream.rotate("reverse-landscape")).toEqual(true);
+  expect(stream.getCurrentRotation()).toEqual(270);
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 9.81,
+      y: 0,
+      z: 0,
+    },
+  );
+
+  expect(stream.rotate("portrait")).toEqual(true);
+  expect(stream.getCurrentRotation()).toEqual(0);
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 0,
+      y: 9.81,
+      z: 0,
+    },
+  );
+
+  // landscape origin mapping
+  stream._originalOrientation = "landscape";
+
+  expect(stream.rotate("reverse-portrait")).toEqual(true);
+  expect(stream.getCurrentRotation()).toEqual(90);
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: -9.81,
+      y: 0,
+      z: 0,
+    },
+  );
+
+  expect(stream.rotate("reverse-landscape")).toEqual(true);
+  expect(stream.getCurrentRotation()).toEqual(180);
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 0,
+      y: -9.81,
+      z: 0,
+    },
+  );
+
+  expect(stream.rotate("portrait")).toEqual(true);
+  expect(stream.getCurrentRotation()).toEqual(270);
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 9.81,
+      y: 0,
+      z: 0,
+    },
+  );
+
+  expect(stream.rotate("landscape")).toEqual(true);
+  expect(stream.getCurrentRotation()).toEqual(0);
+  expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
+    "sensor:event",
+    {
+      sensor: "acceleration",
+      x: 0,
+      y: 9.81,
+      z: 0,
+    },
+  );
+
+  // invalid string
+  expect(stream.rotate("str")).toEqual(false);
+  expect(errSpy).toHaveBeenCalledWith("Invalid orientation given: str");
+
+  errSpy.mockRestore();
+  expect(() => stream.disconnect()).not.toThrow();
+});
+
 test("request and exit full screen", () => {
   sdkOptions.fullScreen = true;
   const stream = new AnboxStream(sdkOptions);
@@ -515,12 +651,8 @@ test("rotate for invalid degree inputs", () => {
   const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
   const stream = new AnboxStream(sdkOptions);
   expect(stream.rotate(45)).toEqual(false);
-  expect(stream.rotate("str")).toEqual(false);
   expect(errSpy).toHaveBeenCalledWith(
     "Invalid rotation degree: 45. Must be a multiple of 90.",
-  );
-  expect(errSpy).toHaveBeenCalledWith(
-    "Invalid rotation degree: str. Must be a multiple of 90.",
   );
   errSpy.mockRestore();
 });
