@@ -14,11 +14,15 @@ jobs:
   build:
     name: Run Trivy security scan
     runs-on: [self-hosted, linux, X64, jammy, large]
+    env:
+      TRIVY_ENABLED: ${{ vars.TRIVY_ENABLED || 'false' }} # TODO: re-enable after the upstream Trivy supply-chain incident is resolved and audited
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
     - name: Setup Trivy
+      if: env.TRIVY_ENABLED == 'true'
       uses: ./.github/actions/setup-trivy
     - name: Run Trivy vulnerability scanner
+      if: env.TRIVY_ENABLED == 'true'
       run: |
         trivy repository "$GITHUB_WORKSPACE" \
           -c trivy.yaml \
@@ -26,4 +30,5 @@ jobs:
           --show-suppressed \
           --cache-dir="$GITHUB_WORKSPACE"/.cache/trivy
     - name: Compare Trivy results with KEV list
+      if: env.TRIVY_ENABLED == 'true'
       run: bash ./scripts/compare_kev_vulnerabilities.sh
