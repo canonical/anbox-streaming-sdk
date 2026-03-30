@@ -1025,3 +1025,57 @@ test("control channel is closed when rotate a pointer event", () => {
 
   expect(stream.rotate(90)).toEqual(false);
 });
+
+test("sendInputKey sends key-down and key-up for a tap", () => {
+  let stream = setupStream(sdkOptions);
+  let mockFn = jest.fn();
+  stream._webrtcManager.sendControlMessage = mockFn;
+
+  const result = stream.sendInputKey("Volumeup");
+
+  expect(result).toEqual(true);
+  expect(mockFn.mock.calls.length).toEqual(2);
+  expect(mockFn.mock.calls[0][0]).toEqual("input::key");
+  expect(mockFn.mock.calls[0][1]).toEqual({ code: 90, pressed: true });
+  expect(mockFn.mock.calls[1][0]).toEqual("input::key");
+  expect(mockFn.mock.calls[1][1]).toEqual({ code: 90, pressed: false });
+});
+
+test("sendInputKey sends only key-down when pressed is true", () => {
+  let stream = setupStream(sdkOptions);
+  let mockFn = jest.fn();
+  stream._webrtcManager.sendControlMessage = mockFn;
+
+  const result = stream.sendInputKey("Power", true);
+
+  expect(result).toEqual(true);
+  expect(mockFn.mock.calls.length).toEqual(1);
+  expect(mockFn.mock.calls[0][0]).toEqual("input::key");
+  expect(mockFn.mock.calls[0][1]).toEqual({ code: 91, pressed: true });
+});
+
+test("sendInputKey sends only key-up when pressed is false", () => {
+  let stream = setupStream(sdkOptions);
+  let mockFn = jest.fn();
+  stream._webrtcManager.sendControlMessage = mockFn;
+
+  const result = stream.sendInputKey("Power", false);
+
+  expect(result).toEqual(true);
+  expect(mockFn.mock.calls.length).toEqual(1);
+  expect(mockFn.mock.calls[0][0]).toEqual("input::key");
+  expect(mockFn.mock.calls[0][1]).toEqual({ code: 91, pressed: false });
+});
+
+test("sendInputKey returns false and logs an error for unknown key", () => {
+  let stream = setupStream(sdkOptions);
+  let mockFn = jest.fn();
+  stream._webrtcManager.sendControlMessage = mockFn;
+  console.error = jest.fn();
+
+  const result = stream.sendInputKey("UnknownKey");
+
+  expect(result).toEqual(false);
+  expect(console.error).toHaveBeenCalledWith('Unknown input key: "UnknownKey"');
+  expect(mockFn.mock.calls.length).toEqual(0);
+});

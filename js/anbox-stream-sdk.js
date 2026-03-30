@@ -1104,6 +1104,36 @@ class AnboxStream {
     return this._sendIMEMessage(_imeEventType.ComposingRegion, data);
   }
 
+  /**
+   * Send a key event to the remote Android instance.
+   *
+   * When `pressed` is omitted the call simulates a full tap: key-down
+   * followed immediately by key-up. Pass an explicit boolean to control
+   * each half of the event independently, which is required when the
+   * hold duration is driven by real user interaction(e.g. a UI button).
+   *
+   * @param key {string} Key name matching one of the entries in _keyScancodes,
+   *   e.g. "Volumeup", "Volumedown", "Power", etc.
+   *   See _keyScancodes for the full list of supported keys.
+   * @param pressed {boolean|undefined} true = key-down only, false = key-up only,
+   *   undefined (default) = full tap (key-down + key-up).
+   * @return {boolean} true on success, false if the key is not recognised.
+   */
+  sendInputKey(key, pressed = undefined) {
+    const code = _keyScancodes[key];
+    if (code === undefined) {
+      console.error(`Unknown input key: "${key}"`);
+      return false;
+    }
+    if (pressed === undefined) {
+      this._sendInputEvent("key", { code, pressed: true });
+      this._sendInputEvent("key", { code, pressed: false });
+    } else {
+      this._sendInputEvent("key", { code, pressed });
+    }
+    return true;
+  }
+
   sendData(channelName, data) {
     return this._webrtcManager.sendData(channelName, data);
   }
