@@ -2074,6 +2074,9 @@ const _keyScancodes = {
   Meta: 86,
   AltGraph: 87,
   NumLock: 88,
+  Volumedown: 89,
+  Volumeup: 90,
+  Power: 91,
 };
 
 const _modifierEnum = {
