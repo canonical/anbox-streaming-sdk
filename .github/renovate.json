@@ -10,7 +10,7 @@
     "group:allNonMajor",
     "group:allDigest"
   ],
-  "minimumReleaseAge": "7 days",
+  "minimumReleaseAge": "90 days",
   "minimumReleaseAgeBehaviour": "timestamp-optional",
   "prCreation": "not-pending",
   "packageRules": [
