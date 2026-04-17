@@ -2161,6 +2161,7 @@ const _keyScancodes = {
   Volumedown: 89,
   Volumeup: 90,
   Power: 91,
+  Back: 92,
 };
 
 const _modifierEnum = {
