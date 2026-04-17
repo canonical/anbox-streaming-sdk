@@ -1081,3 +1081,26 @@ test("sendInputKey returns false and logs an error for unknown key", () => {
   expect(console.error).toHaveBeenCalledWith('Unknown input key: "UnknownKey"');
   expect(mockFn.mock.calls.length).toEqual(0);
 });
+
+test("common Android keys are present with correct scancodes", () => {
+  let stream = setupStream(sdkOptions);
+  stream._webrtcManager.sendControlMessage = jest.fn();
+
+  const androidKeys = [
+    { name: "Home", code: 74 },
+    { name: "Volumedown", code: 89 },
+    { name: "Volumeup", code: 90 },
+    { name: "Power", code: 91 },
+    { name: "Back", code: 92 },
+  ];
+
+  for (const { name, code } of androidKeys) {
+    stream._webrtcManager.sendControlMessage.mockClear();
+    const result = stream.sendInputKey(name);
+    expect(result).toEqual(true);
+    expect(stream._webrtcManager.sendControlMessage).toHaveBeenCalledWith(
+      "input::key",
+      { code, pressed: true },
+    );
+  }
+});
