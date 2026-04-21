@@ -1,0 +1,41 @@
+name: Setup anbox-tools
+description: |
+  Installs the anbox-tools snap from the specified channel.
+
+  Optionally sets up snap aliases so that each app (e.g. anbox-tools.adt)
+  is also accessible under its short name (e.g. adt).
+
+inputs:
+  channel:
+    description: Snap channel to install anbox-tools from.
+    required: false
+    default: 'latest/edge'
+  setup-aliases:
+    description: |
+      Whether to create snap aliases for each app in the anbox-tools snap,
+      making them accessible without the 'anbox-tools.' prefix.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+  - name: Install anbox-tools snap
+    shell: bash
+    env:
+      CHANNEL: ${{ inputs.channel }}
+    run: sudo snap install anbox-tools --channel="${CHANNEL}" --classic
+
+  - name: Setup snap aliases
+    if: inputs.setup-aliases == 'true'
+    shell: bash
+    run: |
+      apps=(
+        adt
+        aim
+        check-osv-severity
+        spread
+      )
+      for app in "${apps[@]}"; do
+        sudo snap alias "anbox-tools.${app}" "${app}"
+      done

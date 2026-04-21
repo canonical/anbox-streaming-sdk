@@ -1,0 +1,51 @@
+name: Setup osv-scanner for SBOM vulnerability scanning
+description: |
+  The action installs the osv-scanner binary downloaded from the GitHub releases page.
+  The SHA256 checksum of the binary is verified before installing it.
+  Supports amd64 and arm64.
+
+runs:
+  using: composite
+  steps:
+  - name: Set version constants
+    id: constants
+    shell: bash
+    run: |
+      echo "version=2.3.5" >> "${GITHUB_OUTPUT}"
+      case "$(uname -m)" in
+        x86_64)
+          echo "arch=amd64" >> "${GITHUB_OUTPUT}"
+          echo "sha256=bb30c580afe5e757d3e959f4afd08a4795ea505ef84c46962b9a738aa573b41b" >> "${GITHUB_OUTPUT}"
+          ;;
+        aarch64)
+          echo "arch=arm64" >> "${GITHUB_OUTPUT}"
+          echo "sha256=fa46ad2b3954db5d5335303d45de921613393285d9a93c140b63b40e35e9ce50" >> "${GITHUB_OUTPUT}"
+          ;;
+        *)
+          echo "::error::Unsupported architecture"
+          exit 1
+        ;;
+      esac
+  - name: Restore osv-scanner binary from cache
+    id: cache
+    uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+    with:
+      key: osv-scanner-${{ steps.constants.outputs.arch }}-${{ steps.constants.outputs.version }}
+      path: ${{ runner.temp }}/osv-scanner
+
+  - name: Download and verify osv-scanner
+    if: steps.cache.outputs.cache-hit != 'true'
+    shell: bash
+    env:
+      OSV_SCANNER_VERSION: ${{ steps.constants.outputs.version }}
+      OSV_SCANNER_SHA256: ${{ steps.constants.outputs.sha256 }}
+      OSV_SCANNER_ARCH: ${{ steps.constants.outputs.arch }}
+    run: |
+      curl -fsSL -o "${RUNNER_TEMP}/osv-scanner" \
+        "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_${OSV_SCANNER_ARCH}"
+      sha256sum --check --status <<< "${OSV_SCANNER_SHA256} ${RUNNER_TEMP}/osv-scanner"
+
+  - name: Install osv-scanner
+    shell: bash
+    run: |
+      sudo install -m 0755 "${RUNNER_TEMP}/osv-scanner" /usr/local/bin/osv-scanner

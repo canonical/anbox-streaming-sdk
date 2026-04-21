@@ -1,0 +1,30 @@
+name: Setup KEV list
+description: |
+  Downloads and caches the CISA Known Exploited Vulnerabilities (KEV) list.
+  The list is cached daily to avoid repeated downloads.
+
+runs:
+  using: composite
+  steps:
+  - name: Calculate cache key
+    shell: bash
+    id: cache_key
+    run: |
+      date="$(date +'%Y-%m-%d')"
+      echo "kev=kev-list-${date}" >> $GITHUB_OUTPUT
+
+  - name: Restore KEV list from cache
+    id: cache_kev
+    uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+    with:
+      key: ${{ steps.cache_key.outputs.kev }}
+      path: ${{ github.workspace }}/kev.json
+      restore-keys:
+        kev-list-
+
+  - name: Fetch KEV list from CISA
+    if: steps.cache_kev.outputs.cache-hit != 'true'
+    shell: bash
+    run: |
+      curl -fsSL -o kev.json \
+        https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
