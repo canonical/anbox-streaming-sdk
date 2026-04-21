@@ -14,11 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-trivy fs "$GITHUB_WORKSPACE" --format json --output trivy-full-report.json
-
 kev_cves="$(jq -r '.vulnerabilities[].cveID' kev.json | sort -u)"
 
-found_cves="$(jq -r '.Results[] | select(.Vulnerabilities != null) | .Vulnerabilities[].VulnerabilityID' trivy-full-report.json | sort -u)"
+found_cves="$(jq -r '.results[].packages[].groups[].ids[]' osv-results.json | grep '^CVE-' | sort -u)"
 
 matches="$(echo "$found_cves" | grep -F -f <(echo "$kev_cves") || true)"
 

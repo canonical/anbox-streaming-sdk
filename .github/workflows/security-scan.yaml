@@ -11,24 +11,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Run Trivy security scan
-    runs-on: [self-hosted, linux, X64, jammy, large]
-    env:
-      TRIVY_ENABLED: ${{ vars.TRIVY_ENABLED || 'false' }} # TODO: re-enable after the upstream Trivy supply-chain incident is resolved and audited
+  security-scan:
+    name: Run SBOM vulnerability scan
+    runs-on: self-hosted-linux-amd64-jammy-large
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-    - name: Setup Trivy
-      if: env.TRIVY_ENABLED == 'true'
-      uses: ./.github/actions/setup-trivy
-    - name: Run Trivy vulnerability scanner
-      if: env.TRIVY_ENABLED == 'true'
+    - name: Setup anbox-tools
+      uses: ./.github/actions/setup-anbox-tools
+    - name: Setup syft
+      uses: ./.github/actions/setup-syft
+    - name: Setup osv-scanner
+      uses: ./.github/actions/setup-osv-scanner
+    - name: Setup KEV list
+      uses: ./.github/actions/setup-kev
+    - name: Generate SBOM
       run: |
-        trivy repository "$GITHUB_WORKSPACE" \
-          -c trivy.yaml \
-          --ignorefile .trivyignore \
-          --show-suppressed \
-          --cache-dir="$GITHUB_WORKSPACE"/.cache/trivy
-    - name: Compare Trivy results with KEV list
-      if: env.TRIVY_ENABLED == 'true'
+        syft scan dir:"$GITHUB_WORKSPACE" \
+          --output spdx-json=source.spdx.json
+    - name: Scan SBOM for vulnerabilities
+      run: |
+        osv-scanner scan -L source.spdx.json \
+          --config osv-scanner.toml \
+          --format json \
+          --output osv-results.json \
+          || true
+    - name: Check vulnerability severity
+      run: check-osv-severity --severity=medium osv-results.json
+    - name: Compare results with KEV list
       run: bash ./scripts/compare_kev_vulnerabilities.sh
