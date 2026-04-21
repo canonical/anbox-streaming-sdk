@@ -1,0 +1,59 @@
+name: Setup syft for SBOM generation
+description: |
+  The action installs the syft binary downloaded from the GitHub releases page.
+  The SHA256 checksum of the archive is verified before extracting the binary.
+  Supports amd64 and arm64.
+
+runs:
+  using: composite
+  steps:
+  - name: Set version constants
+    id: constants
+    shell: bash
+    run: |
+      echo "version=1.42.3" >> "${GITHUB_OUTPUT}"
+      case "$(uname -m)" in
+        x86_64)
+          echo "arch=amd64" >> "${GITHUB_OUTPUT}"
+          echo "sha256=0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509" >> "${GITHUB_OUTPUT}"
+          ;;
+        aarch64)
+          echo "arch=arm64" >> "${GITHUB_OUTPUT}"
+          echo "sha256=dc630590c953347789d08f8ebf57c7d8094db89100785fcd94b1cddeac791804" >> "${GITHUB_OUTPUT}"
+          ;;
+        *)
+          echo "::error::Unsupported architecture"
+          exit 1
+        ;;
+      esac
+  - name: Restore syft binary from cache
+    id: cache
+    uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+    with:
+      key: syft-${{ steps.constants.outputs.arch }}-${{ steps.constants.outputs.version }}
+      path: ${{ runner.temp }}/syft
+
+  - name: Download and verify syft
+    if: steps.cache.outputs.cache-hit != 'true'
+    shell: bash
+    env:
+      SYFT_VERSION: ${{ steps.constants.outputs.version }}
+      SYFT_SHA256: ${{ steps.constants.outputs.sha256 }}
+      SYFT_ARCH: ${{ steps.constants.outputs.arch }}
+    run: |
+      (
+        cleanup() {
+          rm -f syft.tar.gz
+        }
+        trap cleanup INT TERM EXIT
+        curl -fsSL -o syft.tar.gz \
+          "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_${SYFT_ARCH}.tar.gz"
+        sha256sum --check --status <<< "${SYFT_SHA256} syft.tar.gz"
+        tar xf syft.tar.gz syft
+        mv syft "${RUNNER_TEMP}/syft"
+      )
+
+  - name: Install syft
+    shell: bash
+    run: |
+      sudo install -m 0755 "${RUNNER_TEMP}/syft" /usr/local/bin/syft
