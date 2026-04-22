@@ -298,3 +298,28 @@ test("custom message callback is called", (done) => {
   event = { data: "foo_text" };
   chans[0].onmessage(event);
 });
+
+test("do not log control message data when debug is disabled", () => {
+  sdkOptions.callbacks = {};
+  sdkOptions.experimental = { debug: false };
+  const stream = new AnboxStream(sdkOptions);
+  const consoleInfoSpy = jest.spyOn(console, "info");
+
+  const msg = JSON.stringify({ type: "action", data: "test" });
+  stream._webrtcManager._onControlMessageReceived({ data: msg });
+
+  expect(consoleInfoSpy).not.toHaveBeenCalled();
+  consoleInfoSpy.mockRestore();
+});
+
+test("log control message data when debug is enabled", () => {
+  sdkOptions.callbacks = {};
+  sdkOptions.experimental = { debug: true };
+  const stream = new AnboxStream(sdkOptions);
+  const logSpy = jest.spyOn(stream._webrtcManager, "_log");
+
+  const msg = JSON.stringify({ type: "action", data: "test" });
+  stream._webrtcManager._onControlMessageReceived({ data: msg });
+
+  expect(logSpy).toHaveBeenCalledWith("control message received: " + msg);
+});

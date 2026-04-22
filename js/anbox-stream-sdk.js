@@ -3210,6 +3210,8 @@ class AnboxWebRTCManager {
   }
 
   _onControlMessageReceived(event) {
+    this._log("control message received: " + event.data);
+
     const msg = JSON.parse(event.data);
     switch (msg.type) {
       case "open-camera":
