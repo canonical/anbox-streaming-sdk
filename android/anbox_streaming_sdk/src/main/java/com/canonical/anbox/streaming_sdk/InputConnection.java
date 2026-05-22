@@ -36,6 +36,7 @@ public class InputConnection extends BaseInputConnection {
         void onTextComposing(String text);
         void onTextDeleted(int counts);
         void onComposingRegionChanged(int start, int end);
+        void onEnterKeyEvent();
     }
     private TextChangedListener mListener;
 
@@ -70,8 +71,24 @@ public class InputConnection extends BaseInputConnection {
 
             mListener.onTextDeleted(1);
             return true;
+        } else if (event.getAction() == KeyEvent.ACTION_DOWN &&
+                event.getKeyCode() == KeyEvent.KEYCODE_ENTER) {
+            // Some soft keyboards send KEYCODE_ENTER via sendKeyEvent instead of commitText("\n")
+            // or performEditorAction(). Forward it to the server so the game can process it.
+            mListener.onEnterKeyEvent();
+            return true;
         }
         return super.sendKeyEvent(event);
+    }
+
+    @Override
+    public boolean performEditorAction(int actionCode) {
+        // Some soft keyboards trigger performEditorAction() (e.g. IME_ACTION_DONE / IME_ACTION_GO)
+        // instead of commitText("\n") or sendKeyEvent(KEYCODE_ENTER) when the user presses the
+        // Enter/Done/Go/Send key. Forward this as a KEYCODE_ENTER to the server so the game receives
+        // and processes it (e.g. dismisses the Anbox IME).
+        mListener.onEnterKeyEvent();
+        return true;
     }
 
     @Override

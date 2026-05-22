@@ -1080,6 +1080,11 @@ class AnboxStream {
     return this._sendIMECode(_android_KEYCODE_DEL, counts);
   }
 
+  sendIMEKeyCode(keyCode, times) {
+    if (times <= 0) return;
+    return this._sendIMECode(keyCode, times);
+  }
+
   sendIMEAction(name, params) {
     if (typeof params === "undefined") params = "";
 
