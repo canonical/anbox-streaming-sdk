@@ -94,6 +94,14 @@ public class AnboxWebView extends WebView implements
          *        ratio on the client side.
          */
         void onVirtualKeyboardStateChanged(boolean isShow, double heightRatio);
+
+        /**
+         * Called when the Enter key or an equivalent editor action (Done, Go, Send, etc.) is
+         * received from the virtual keyboard. Implement this to forward the event to the Android
+         * container when a custom {@link VirtualKeyboardListener} is set. When no listener is set
+         * the SDK forwards the event automatically via {@code sendIMEKeyCode}.
+         */
+        default void onVirtualKeyboardEnterKeyEvent() {}
     }
     private VirtualKeyboardListener mVirtualKeyboardListener;
 
@@ -202,6 +210,20 @@ public class AnboxWebView extends WebView implements
             // the text stay in synced on client and server ends, we need to signal this to
             // the Android container to keep cursor position in sync with on both ends.
             this.loadUrl(String.format("javascript:sendIMEComposingRegion(%d, %d)", start, end));
+        }
+    }
+
+    @Override
+    public void onEnterKeyEvent() {
+        if (mVirtualKeyboardListener != null) {
+            mVirtualKeyboardListener.onVirtualKeyboardEnterKeyEvent();
+        } else {
+            // Forward KEYCODE_ENTER to the Android container so games that use
+            // performEditorAction() or sendKeyEvent() can process the key
+            // and dismisses the Anbox IME and subsequently hides the client-side
+            // virtual keyboard via wire protocol.
+            final int KEYCODE_ENTER = 66;
+            this.loadUrl(String.format("javascript:sendIMEKeyCode(%d, 1)", KEYCODE_ENTER));
         }
     }
 
