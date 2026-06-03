@@ -3189,9 +3189,12 @@ class AnboxWebRTCManager {
   }
 
   _addIceCandidate(msg) {
-    this._log("got RTC candidate");
+    const candidate = atob(msg.candidate);
+    this._log(
+      `got RTC candidate: ${candidate} (sdpMid=${msg.sdpMid}, sdpMLineIndex=${msg.sdpMLineIndex})`,
+    );
     this._pc.addIceCandidate({
-      candidate: atob(msg.candidate),
+      candidate: candidate,
       sdpMLineIndex: msg.sdpMLineIndex,
       sdpMid: msg.sdpMid,
     });
