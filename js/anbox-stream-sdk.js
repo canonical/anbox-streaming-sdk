@@ -4442,9 +4442,9 @@ class AnboxVhalManager {
    * responsible to communicate with an Android VHAL.
    * @param webrtcManager {object} Anbox WebRTCManager object.
    * @param vhalReady {function} Callback to notify subscribers that VHAL is ready.
-   * @param [timeout=1000] {number} How long to wait for an answer for the VHAL calls (in milliseconds).
+   * @param [timeout=5000] {number} How long to wait for an answer for the VHAL calls (in milliseconds).
    */
-  constructor(webrtcManager, vhalReady = () => {}, timeout = 1000) {
+  constructor(webrtcManager, vhalReady = () => {}, timeout = 5000) {
     this._webrtcManager = webrtcManager;
     this._vhalReady = vhalReady;
     this._timeout = timeout;
