@@ -22,7 +22,7 @@ Refer to the following examples to explore advanced usage scenarios and best pra
 
 * [Simple Android Webview Streaming](examples/android/webview_streaming) - An Android example that embeds WebView integrated with the JS SDK for video streaming.
 * [Enhanced Android Webview Streaming](examples/android/enhanced_webview_streaming) - An Android example that embeds AnboxWebView for text input handling enhancement for a hybrid application.
-* [Out of Band](examples/android/out_of_band_v2) - An Android example demonstrating the usage of [out of band data](https://documentation.ubuntu.com/anbox-cloud/en/latest/howto/stream/exchange-oob-data/#oob-v2) feature which exchanges data between the Android application running in the Anbox container and a streaming client.
+* [Out of Band](examples/android/out_of_band_v2) - An Android example demonstrating the usage of [out of band data](https://canonical.com/anbox-cloud/docs/howto/stream/exchange-oob-data/#oob-v2) feature which exchanges data between the Android application running in the Anbox container and a streaming client.
 * [JavaScript-based Streaming Example](examples/js) - A web application utilizes the JS SDK for video streaming.
 
 ## Testing
@@ -34,16 +34,16 @@ The JS SDK library comes with two test suites: one for unit tests and another fo
 
 Both these folders contain a `run-tests.sh` script, which runs the tests inside a Docker container. Check how to install Docker [here](https://docs.docker.com/engine/install/).
 
-If you want to run end-to-end tests, you need an Anbox Cloud deployment. The easiest way to set up one is by using the [Anbox Cloud Appliance](https://documentation.ubuntu.com/anbox-cloud/en/latest/tutorial/installing-appliance/).
+If you want to run end-to-end tests, you need an Anbox Cloud deployment. The easiest way to set up one is by using the [Anbox Cloud Appliance](https://canonical.com/anbox-cloud/docs/tutorial/installing-appliance/).
 
 Once the appliance is ready, follow these steps to run the end-to-end tests:
 
 - In the `js/tests/e2e` folder, create a `.env.local` file.
 - Add the following environment variables in the `.env.local` file:
   - `ASG_API_TOKEN=my-asg-api-token`
-    Token to access the stream gateway API. See reference [here](https://documentation.ubuntu.com/anbox-cloud/en/latest/howto/stream/access-stream-gateway/#creating-a-token).
+    Token to access the stream gateway API. See reference [here](https://canonical.com/anbox-cloud/docs/howto/stream/access-stream-gateway/#creating-a-token).
   - `AMS_API_CERTIFICATE=./path-to-ams-cert.crt`
-    A certificate that is trusted by AMS. See reference [here](https://documentation.ubuntu.com/anbox-cloud/en/latest/howto/anbox/control-ams-remotely/#install-a-trusted-certificate).
+    A certificate that is trusted by AMS. See reference [here](https://canonical.com/anbox-cloud/docs/howto/anbox/control-ams-remotely/#install-a-trusted-certificate).
   - `AMS_API_CERTIFICATE_KEY=./path-to-ams-cert.key`
     The key for the certificate above.
   - `AMS_API_URL=https://my-ams-url:8444`
