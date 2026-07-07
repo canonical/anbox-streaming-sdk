@@ -824,7 +824,7 @@ class AnboxStream {
       );
     } else if (container.clientWidth == 0 || container.clientHeight == 0)
       console.error(
-        "AnboxStream: video container element misses size. Please see https://documentation.ubuntu.com/anbox-cloud/en/latest/tutorial/stream-client",
+        "AnboxStream: video container element misses size. Please see https://canonical.com/anbox-cloud/docs/tutorial/stream-client",
       );
 
     if (this._nullOrUndef(options.connector)) {
