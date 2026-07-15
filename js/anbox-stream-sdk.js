@@ -182,6 +182,7 @@ class AnboxStream {
       preferredVideoDecoderCodecs: this._options.video.preferred_decoder_codecs,
     });
     this._webrtcManager.onReady(this._webrtcReady.bind(this));
+    this._webrtcManager.onExtraVideoTrack(this._onExtraVideoTrack.bind(this));
     this._webrtcManager.onError((err) => {
       this._stopStreamingOnError(err.message, err.cause.code);
     });
@@ -2375,6 +2376,8 @@ class AnboxWebRTCManager {
     this._video_codec_id = null;
     this._audioOutput_codec_id = null;
     this._audioInput_codec_id = null;
+    // All video streams keyed by display index (parsed from server track name "video_N")
+    this._videoStreams = [];
 
     this._stream = {
       video: options.enableVideoStream,
@@ -2480,6 +2483,8 @@ class AnboxWebRTCManager {
     // eslint-disable-next-line no-unused-vars
     this._onReady = (videoStream, audioStream) => {};
     this._onClose = () => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onExtraVideoTrack = (trackIndex, stream) => {};
     this._onMicRequested = () => false;
     this._onCameraRequested = () => false;
     // eslint-disable-next-line no-unused-vars
@@ -2513,6 +2518,22 @@ class AnboxWebRTCManager {
    */
   onReady(callback) {
     this._onReady = callback;
+  }
+
+  /**
+   * @callback onExtraVideoTrack
+   * @param displayId {number} Zero-based display index derived from the server-assigned
+   *   track name ("video_N"). Stable across dynamic display add/remove.
+   * @param stream {MediaStream} Stream to attach to the extra video element
+   */
+  /**
+   * Called when an additional video track is received.
+   * The display index is parsed from the server-assigned track name and is
+   * stable even when displays are added or removed dynamically.
+   * @param callback {onExtraVideoTrack}
+   */
+  onExtraVideoTrack(callback) {
+    this._onExtraVideoTrack = callback;
   }
 
   /**
@@ -3286,8 +3307,36 @@ class AnboxWebRTCManager {
   _onRtcTrack(event) {
     const kind = event.track.kind;
     if (kind === "video") {
-      this._videoStream = event.streams[0];
-      this._videoStream.onremovetrack = this._onClose;
+      // The server assigns each video track the label "video_N" (where N is the
+      // display id) via CreateVideoTrack in peer_connection.cpp. On client
+      // side, Parsing it here from MediaStreamTrack.id gives us the correct display
+      // id even when displays are added or removed dynamically.
+      let displayId;
+      const m = event.track.id.match(/^video_(\d+)$/);
+      if (m) {
+        displayId = parseInt(m[1], 10);
+      } else {
+        console.error(
+          `failed to paser display id: ${event.track.id}`,
+        );
+        return;
+      }
+
+      // Wrap the single track in its own MediaStream. All video tracks share
+      // the same stream_id on the server side so event.streams[0] is the same
+      // MediaStream object for every track. A per-track MediaStream guarantees
+      // each video element renders its own display independently.
+      const singleTrackStream = new MediaStream([event.track]);
+      this._videoStreams[displayId] = singleTrackStream;
+
+      if (displayId === 0) {
+        // Primary display (legacy single display)
+        this._videoStream = singleTrackStream;
+        if (event.streams[0]) event.streams[0].onremovetrack = this._onClose;
+      } else {
+        // External displays and notify AnboxStream to wire a new video element
+        this._onExtraVideoTrack(displayId, singleTrackStream);
+      }
     } else if (kind === "audio") {
       this._audioStream = event.streams[0];
       this._audioStream.onremovetrack = this._onClose;
