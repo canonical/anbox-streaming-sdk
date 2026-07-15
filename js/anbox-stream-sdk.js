@@ -1458,13 +1458,15 @@ class AnboxStream {
    */
   _getPressedButton(event) {
     switch (event.button) {
-      case 0: // no button
+      case 0: // main button (left)
         return 1;
-      case 1: // primary button (left click)
-        return 2;
-      case 2: // secondary button (right click)
+      case 1: // auxiliary button (middle)
         return 3;
-      case 4: // auxiliary button (middle click usually) - NOT CURRENTLY SUPPORTED BY ANBOX
+      case 2: // secondary button (right)
+        return 2;
+      case 3: // browser back
+        return 4;
+      case 4: // browser forward
         return 5;
       default:
         return 0;
