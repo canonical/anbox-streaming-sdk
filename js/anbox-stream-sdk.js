@@ -158,10 +158,33 @@ class AnboxStream {
       this._detectUnsupportedBrowser();
 
     this._id = Math.random().toString(36).substr(2, 9);
-    this._containerID = options.targetElement;
+
+    // _containerID is the primary display container. It's reserved for
+    // in single display.
+    this._containerID = options.targetElement || null;
+    // _containerIDs is an array of video container IDs used to attach input listeners
+    // to multiple video tracks.
+    this._containerIDs = this._containerID ? {0: this._containerID} : {};
+
     this._videoID = "anbox-stream-video-" + this._id;
     this._audioID = "anbox-stream-audio-" + this._id;
     this._canvasID = "anbox-stream-canvas-" + this._id;
+    this._multiDisplayActive = false;
+
+    this._pendingVideoTracks = {};
+    this._pendingReadyCount = 0;
+
+    this._displayStates = this._containerID
+      ? {
+          0: {
+            dimensions: null,
+            activeTouchPointers: [],
+            pointerIdsMapper: {},
+            primaryTouchId: 0,
+            pointersOutofBounds: {},
+          },
+        }
+      : {};
 
     // WebRTC
     this._webrtcManager = new AnboxWebRTCManager({
@@ -248,16 +271,45 @@ class AnboxStream {
 
     // Control options
     this._modifierState = 0;
-    this._dimensions = null;
     this._gamepadManager = null;
     this._streamCanvas = null;
 
     this._originalOrientation = null;
     this._currentRotationDegrees = 0;
-    this._primaryTouchId = 0;
-    this._pointersOutofBounds = {};
-    this._activeTouchPointers = [];
-    this._pointerIdsMapper = {};
+    // Legacy aliases forward to primary display state for any code that was not
+    // yet updated to use the per-display state bag.
+    Object.defineProperty(this, "_dimensions", {
+      get: () => this._displayStates[0].dimensions,
+      set: (v) => {
+        this._displayStates[0].dimensions = v;
+      },
+    });
+    Object.defineProperty(this, "_primaryTouchId", {
+      get: () => this._displayStates[0].primaryTouchId,
+      set: (v) => {
+        this._displayStates[0].primaryTouchId = v;
+      },
+    });
+    Object.defineProperty(this, "_pointersOutofBounds", {
+      get: () => this._displayStates[0].pointersOutofBounds,
+      set: (v) => {
+        this._displayStates[0].pointersOutofBounds = v;
+      },
+    });
+    Object.defineProperty(this, "_activeTouchPointers", {
+      get: () => this._displayStates[0].activeTouchPointers,
+      set: (v) => {
+        this._displayStates[0].activeTouchPointers = v;
+      },
+    });
+    Object.defineProperty(this, "_pointerIdsMapper", {
+      get: () => this._displayStates[0].pointerIdsMapper,
+      set: (v) => {
+        this._displayStates[0].pointerIdsMapper = v;
+      },
+    });
+
+    this._displayEventListeners = [];
 
     this.controls = {
       touch: {
@@ -1010,17 +1062,38 @@ class AnboxStream {
     window.addEventListener("resize", this._onResize);
 
     if (this._options.controls.mouse) {
-      const container = document.getElementById(this._containerID);
-      if (container) {
-        for (const controlName in this.controls.touch)
-          container.addEventListener(
-            controlName,
-            this.controls.touch[controlName],
-          );
-      }
+      // Register primary display input listeners on its container.
+      const container = document.getElementById(this._containerIDs[0]);
+      if (container) this._registerInputHandlers(0, container);
     }
 
     this.captureKeyboard();
+  }
+
+  _registerInputHandlers(displayId, container) {
+    if (!this._options.controls.mouse) return;
+
+    const handlers = {
+      pointermove: (e) => this._onPointerEvent(e, displayId),
+      pointerdown: (e) => this._onPointerEvent(e, displayId),
+      pointerup: (e) => this._onPointerEvent(e, displayId),
+      pointercancel: (e) => this._onPointerEvent(e, displayId),
+      mousewheel: (e) => this._onMouseWheel(e, displayId),
+    };
+
+    for (const [name, fn] of Object.entries(handlers))
+      container.addEventListener(name, fn);
+
+    this._displayEventListeners[displayId] = { container, handlers };
+  }
+
+  _unregisterInputHandlers(displayId) {
+    const entry = this._displayEventListeners[displayId];
+    if (!entry) return;
+    const { container, handlers } = entry;
+    for (const [name, fn] of Object.entries(handlers))
+      container.removeEventListener(name, fn);
+    delete this._displayEventListeners[displayId];
   }
 
   /**
@@ -1148,17 +1221,9 @@ class AnboxStream {
   _unregisterControls() {
     window.removeEventListener("resize", this._onResize);
 
-    // Removing the video container should automatically remove all event listeners
-    // but this is dependant on the garbage collector, so we manually do it if we can
     if (this._options.controls.mouse) {
-      const container = document.getElementById(this._containerID);
-      if (container) {
-        for (const controlName in this.controls.touch)
-          container.removeEventListener(
-            controlName,
-            this.controls.touch[controlName],
-          );
-      }
+      for (const i of Object.keys(this._containerIDs).map(Number))
+        this._unregisterInputHandlers(i);
     }
 
     this.releaseKeyboard();
@@ -1299,7 +1364,28 @@ class AnboxStream {
     if (video === null || container === null) return;
     if (video.videoWidth === 0 || video.videoHeight === 0) return;
 
-    // We calculate the distance to the closest window border while keeping aspect ratio intact.
+    // In multi-display mode, recompute all attached displays so that any
+    // layout changes (new display added, window resize) are reflected.
+    if (this._multiDisplayActive) {
+      this._computeMultiDisplayDimensions(video, container, 0);
+      const extraIds = Object.keys(this._containerIDs).map(Number).filter(i => i > 0);
+      for (const i of extraIds) {
+        const secId = `${this._videoID}-display-${i}`;
+        const secVideo = document.getElementById(secId);
+        const secContainer = document.getElementById(this._containerIDs[i]);
+        if (
+          secVideo &&
+          secContainer &&
+          secVideo.videoWidth > 0 &&
+          secVideo.videoHeight > 0
+        ) {
+          this._computeMultiDisplayDimensions(secVideo, secContainer, i);
+        }
+      }
+      return;
+    }
+
+    // Single-display mode
     let videoHeight = video.videoHeight;
     let videoWidth = video.videoWidth;
 
@@ -1400,7 +1486,7 @@ class AnboxStream {
     // The visual offset is always derived from the same formula, no matter the orientation.
     const offsetLeft = Math.round(container.clientWidth / 2 - playerWidth / 2);
 
-    this._dimensions = {
+    this._displayStates[0].dimensions = {
       videoHeight: videoHeight,
       videoWidth: videoWidth,
       scalePercentage: resizePercentage,
@@ -1408,6 +1494,52 @@ class AnboxStream {
       playerWidth: playerWidth,
       playerOffsetLeft: offsetLeft,
       playerOffsetTop: offsetTop,
+    };
+  }
+
+  // Compute dimensions for a single display's video element inside its container
+  // for multi-display mode.
+  _computeMultiDisplayDimensions(video, container, displayId) {
+    const cRect = container.getBoundingClientRect();
+    const cellWidth = cRect.width;
+    const cellHeight = cRect.height;
+
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    // Compute the largest size that fits the video aspect ratio inside the cell.
+    const scale = Math.min(cellWidth / videoWidth, cellHeight / videoHeight);
+    const renderedWidth = Math.round(videoWidth * scale);
+    const renderedHeight = Math.round(videoHeight * scale);
+    const offsetLeft = Math.round((cellWidth - renderedWidth) / 2);
+    const offsetTop = Math.round((cellHeight - renderedHeight) / 2);
+
+    // Size and position the video element to exactly match the rendered content.
+    video.style.width = renderedWidth + "px";
+    video.style.height = renderedHeight + "px";
+    video.style.left = offsetLeft + "px";
+    video.style.top = offsetTop + "px";
+
+    if (!(displayId in this._displayStates)) {
+      this._displayStates[displayId] = {
+        dimensions: null,
+        activeTouchPointers: [],
+        pointerIdsMapper: {},
+        primaryTouchId: 0,
+        pointersOutofBounds: {},
+      };
+    }
+
+    // The playerOffset is 0 because the video element is already sized to the
+    // rendered content.
+    this._displayStates[displayId].dimensions = {
+      videoHeight: videoHeight,
+      videoWidth: videoWidth,
+      scalePercentage: scale,
+      playerHeight: renderedHeight,
+      playerWidth: renderedWidth,
+      playerOffsetLeft: 0,
+      playerOffsetTop: 0,
     };
   }
 
@@ -1476,74 +1608,115 @@ class AnboxStream {
 
   /**
    * Returns true if a pointer event (move or click) was emitted outside the video
-   * boundaries
+   * boundaries of the given display.
+   * @param {object} event
+   * @param {number} displayId
    * @returns {boolean}
    * @private
    */
-  _isPointerEventOutOfBounds(event) {
+  _isPointerEventOutOfBounds(event, displayId) {
+    const dim = this._displayStates[displayId].dimensions;
     return (
       event.clientX < 0 ||
-      event.clientX > this._dimensions.playerWidth ||
+      event.clientX > dim.playerWidth ||
       event.clientY < 0 ||
-      event.clientY > this._dimensions.playerHeight
+      event.clientY > dim.playerHeight
     );
   }
 
   /**
    * PointerEvents coordinates are relative to the document. This method
    * removes the various offsets so the (0,0) coordinate corresponds to
-   * to the top left corner of the video element
+   * the top left corner of the video content for the given display.
+   *
+   * Uses _containerIDs[displayId] as the reference element so that in
+   * dynamic single-container mode, coordinates are computed against the
+   * correct cell div (not the outer container), even after the grid layout
+   * changes. Scale and offsets are recomputed live to avoid stale values
+   * when containers resize (e.g. secondary displays appearing).
    * @param event
+   * @param {number} displayId
    * @private
    */
-  _adjustPointerCoordsToVideoBoundaries(event) {
-    const container = document.getElementById(this._containerID);
-    if (!container) return false;
+  _adjustPointerCoordsToVideoBoundaries(event, displayId) {
+    const videoId = displayId === 0
+      ? this._videoID
+      : `${this._videoID}-display-${displayId}`;
+    const video = document.getElementById(videoId);
+    if (!video || !video.videoWidth || !video.videoHeight) return false;
 
-    const dim = this._dimensions;
-    if (!dim) return false;
+    const vRect = video.getBoundingClientRect();
+    if (vRect.width === 0 || vRect.height === 0) return false;
 
-    const cRect = container.getBoundingClientRect();
-    event.clientX = Math.round(
-      event.clientX - cRect.left - dim.playerOffsetLeft,
+    const scale = Math.min(
+      vRect.width / video.videoWidth,
+      vRect.height / video.videoHeight,
     );
-    event.clientY = Math.round(event.clientY - cRect.top - dim.playerOffsetTop);
+    const renderedWidth = Math.round(video.videoWidth * scale);
+    const renderedHeight = Math.round(video.videoHeight * scale);
+    const contentOffsetX = Math.round((vRect.width - renderedWidth) / 2);
+    const contentOffsetY = Math.round((vRect.height - renderedHeight) / 2);
+
+    event.clientX = Math.round(event.clientX - vRect.left - contentOffsetX);
+    event.clientY = Math.round(event.clientY - vRect.top - contentOffsetY);
+
+    // Keep cached dimensions in sync for
+    //  1. _isPointerEventOutOfBounds
+    //  2. _translateLocalCoordsToRemoteCoords
+    const state = this._displayStates[displayId];
+    if (state) {
+      if (!state.dimensions) {
+        state.dimensions = {
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+          scalePercentage: scale,
+          playerWidth: renderedWidth,
+          playerHeight: renderedHeight,
+          playerOffsetLeft: contentOffsetX,
+          playerOffsetTop: contentOffsetY,
+        };
+      } else {
+        state.dimensions.scalePercentage = scale;
+        state.dimensions.playerWidth = renderedWidth;
+        state.dimensions.playerHeight = renderedHeight;
+        state.dimensions.playerOffsetLeft = contentOffsetX;
+        state.dimensions.playerOffsetTop = contentOffsetY;
+      }
+    }
+
     return true;
   }
 
   /**
    * The video displayed on the client might be stretched to fit its display.
-   * Because of this, local coordinates may not match the remote container.
-   * This method translates local coordinates so they fit the remote container
+   * This method translates local coordinates so they fit the remote container.
    * @param event {PointerEvent}
+   * @param {number} displayId
    * @private
    */
-  _translateLocalCoordsToRemoteCoords(event) {
+  _translateLocalCoordsToRemoteCoords(event, displayId) {
+    const dim = this._displayStates[displayId].dimensions;
+
     if (event.pointerType === "touch") {
       const pos = this._convertTouchInput(event.clientX, event.clientY);
       event.clientX = pos.x;
       event.clientY = pos.y;
     }
 
-    // The video might be scaled up or down, so we translate the coordinates to take this
-    // scaling into account
-    event.clientX /= this._dimensions.scalePercentage;
-    event.clientY /= this._dimensions.scalePercentage;
+    event.clientX /= dim.scalePercentage;
+    event.clientY /= dim.scalePercentage;
 
-    event.movementX = Math.round(
-      event.movementX / this._dimensions.scalePercentage,
-    );
-    event.movementY = Math.round(
-      event.movementY / this._dimensions.scalePercentage,
-    );
+    event.movementX = Math.round(event.movementX / dim.scalePercentage);
+    event.movementY = Math.round(event.movementY / dim.scalePercentage);
   }
 
   /**
-   * onPointerEvent is called when a mouse or touch input is fired
-   * @param pointerEvent
+   * onPointerEvent is called when a mouse or touch input is fired.
+   * @param pointerEvent {PointerEvent}
+   * @param {number} [displayId=0] Index of the display that received the event.
    * @private
    */
-  _onPointerEvent(pointerEvent) {
+  _onPointerEvent(pointerEvent, displayId = 0) {
     pointerEvent.preventDefault();
 
     // If pointer lock is used but not active dismiss all events until the
@@ -1554,6 +1727,9 @@ class AnboxStream {
     )
       return;
 
+    const state = this._displayStates[displayId];
+    if (!state) return;
+
     // The pointerEvent.pointerId increments every time when a new touch point
     // is pressed(can be used to differentiate the touch point from others,
     // However the downside of this is that it can not be used as the MT slot
@@ -1563,11 +1739,11 @@ class AnboxStream {
     // correct MT slot event forwarding to Android container.
     const pointerId = Math.abs(pointerEvent.pointerId);
     if (pointerEvent.isPrimary) {
-      this._primaryTouchId = pointerId;
+      state.primaryTouchId = pointerId;
     }
 
-    const ori_pointerId = pointerId - this._primaryTouchId;
-    const new_pointerId = this._findPointerId(ori_pointerId);
+    const ori_pointerId = pointerId - state.primaryTouchId;
+    const new_pointerId = this._findPointerId(ori_pointerId, state);
 
     // JS events are read-only, so we create a clone of the event that
     // we can modify down the road
@@ -1585,9 +1761,9 @@ class AnboxStream {
     if (this._options.controls.emulateTouch) event.pointerType = "touch";
 
     // Transform pointer coordinates so (0,0) corresponds to the top left corner of the video
-    if (!this._adjustPointerCoordsToVideoBoundaries(event)) return;
+    if (!this._adjustPointerCoordsToVideoBoundaries(event, displayId)) return;
 
-    if (this._isPointerEventOutOfBounds(event)) {
+    if (this._isPointerEventOutOfBounds(event, displayId)) {
       // In either of the following cases, ignore the events when
       // they are out of bounds.
       // a) If the feature `emulatePoitnerEvent` is disabled,
@@ -1596,7 +1772,7 @@ class AnboxStream {
       if (!this._options.experimental.emulatePointerEvent) return;
 
       if (
-        event.pointerId in this._pointersOutofBounds &&
+        event.pointerId in state.pointersOutofBounds &&
         event.type != "pointerup"
       )
         return;
@@ -1605,21 +1781,22 @@ class AnboxStream {
       // is out of bounds.
       event.type = "pointerup";
 
+      const dim = state.dimensions;
       if (event.clientX < 0) {
         event.clientX = 0;
-      } else if (event.clientX > this._dimensions.playerWidth) {
-        event.clientX = this._dimensions.playerWidth;
+      } else if (event.clientX > dim.playerWidth) {
+        event.clientX = dim.playerWidth;
       }
       if (event.clientY < 0) {
         event.clientY = 0;
-      } else if (event.clientY > this._dimensions.playerHeight) {
-        event.clientY = this._dimensions.playerHeight;
+      } else if (event.clientY > dim.playerHeight) {
+        event.clientY = dim.playerHeight;
       }
 
-      this._pointersOutofBounds[event.pointerId] = true;
+      state.pointersOutofBounds[event.pointerId] = true;
     } else if (
       this._options.experimental.emulatePointerEvent &&
-      event.pointerId in this._pointersOutofBounds
+      event.pointerId in state.pointersOutofBounds
     ) {
       // Replace the type of the event with 'pointerdown' if it comes
       // to 'pointermove' event after the event with the type 'pointerup'
@@ -1632,24 +1809,26 @@ class AnboxStream {
         event.type = "pointerdown";
       }
 
-      delete this._pointersOutofBounds[event.pointerId];
+      delete state.pointersOutofBounds[event.pointerId];
     }
 
     // Apply video scaling and rotation to the coordinates
-    this._translateLocalCoordsToRemoteCoords(event);
+    this._translateLocalCoordsToRemoteCoords(event, displayId);
 
     if (event.type === "pointermove" && event.pointerType === "touch") {
-      const index = this._activeTouchPointers.indexOf(event.pointerId);
+      const index = state.activeTouchPointers.indexOf(event.pointerId);
       if (index === -1) return;
       this._sendInputEvent("touch-move", {
         id: event.pointerId,
         x: event.clientX,
         y: event.clientY,
+        display_id: displayId,
       });
     } else if (event.type === "pointermove" && event.pointerType === "mouse") {
       var e = {
         rx: event.movementX,
         ry: event.movementY,
+        display_id: displayId,
       };
       if (!this._options.experimental.pointerLock) {
         e.x = event.clientX;
@@ -1657,12 +1836,13 @@ class AnboxStream {
       }
       this._sendInputEvent("mouse-move", e);
     } else if (event.type === "pointerdown" && event.pointerType === "touch") {
-      const index = this._activeTouchPointers.indexOf(event.pointerId);
-      if (index === -1) this._activeTouchPointers.push(event.pointerId);
+      const index = state.activeTouchPointers.indexOf(event.pointerId);
+      if (index === -1) state.activeTouchPointers.push(event.pointerId);
       this._sendInputEvent("touch-start", {
         id: event.pointerId,
         x: event.clientX,
         y: event.clientY,
+        display_id: displayId,
       });
     } else if (event.type === "pointerdown" && event.pointerType === "mouse") {
       const button = this._getPressedButton(event);
@@ -1670,13 +1850,14 @@ class AnboxStream {
       this._sendInputEvent("mouse-button", {
         pressed: true,
         button: button,
+        display_id: displayId,
       });
     } else if (
       (event.type === "pointerup" || event.type === "pointercancel") &&
       event.pointerType === "touch"
     ) {
-      const index = this._activeTouchPointers.indexOf(event.pointerId);
-      if (index > -1) this._activeTouchPointers.splice(index, 1);
+      const index = state.activeTouchPointers.indexOf(event.pointerId);
+      if (index > -1) state.activeTouchPointers.splice(index, 1);
 
       // Fire the `touch-end` event for each touch points to avoid phantom
       // touch pointer but only includes the `BTN_TOUCH=0` message which is
@@ -1687,10 +1868,11 @@ class AnboxStream {
       // Android frameworks, which is incorrect.
       this._sendInputEvent("touch-end", {
         id: event.pointerId,
-        last: this._activeTouchPointers.length === 0,
+        last: state.activeTouchPointers.length === 0,
+        display_id: displayId,
       });
 
-      delete this._pointerIdsMapper[ori_pointerId];
+      delete state.pointerIdsMapper[ori_pointerId];
     } else if (
       (event.type === "pointerup" || event.type === "pointercancel") &&
       event.pointerType === "mouse"
@@ -1700,21 +1882,23 @@ class AnboxStream {
       this._sendInputEvent("mouse-button", {
         pressed: false,
         button: button,
+        display_id: displayId,
       });
     }
   }
 
-  _findPointerId(pointerId) {
+  _findPointerId(pointerId, state) {
     // AOSP supports max 10 touch points and we use the pointerId as the ABS_MT_SLOT
     // and ABS_MT_TRACKING_ID passing down to the container. However the pointerEvent.pointerId
     // would be increased all the time when lifting one finger up and down in a short
     // amount period of time when it comes to multiple touch scenario. Hence we need
     // to find out the minimal available pointerId to avoid the it exceeded the max value.
-    if (Object.keys(this._pointerIdsMapper).length > 0) {
-      if (!(pointerId in this._pointerIdsMapper)) {
+    const mapper = state ? state.pointerIdsMapper : this._pointerIdsMapper;
+    if (Object.keys(mapper).length > 0) {
+      if (!(pointerId in mapper)) {
         let existing_pointerIds = [];
-        Object.keys(this._pointerIdsMapper).forEach((id) => {
-          existing_pointerIds.push(this._pointerIdsMapper[id]);
+        Object.keys(mapper).forEach((id) => {
+          existing_pointerIds.push(mapper[id]);
         });
 
         let new_pointerId = 0;
@@ -1723,16 +1907,16 @@ class AnboxStream {
           if (index === -1) break;
         }
 
-        this._pointerIdsMapper[pointerId] = new_pointerId;
+        mapper[pointerId] = new_pointerId;
       }
     } else {
-      this._pointerIdsMapper[pointerId] = pointerId;
+      mapper[pointerId] = pointerId;
     }
 
-    return this._pointerIdsMapper[pointerId];
+    return mapper[pointerId];
   }
 
-  _onMouseWheel(event) {
+  _onMouseWheel(event, displayId = 0) {
     let move_step = (delta) => {
       if (delta === 0) return 0;
       return delta > 0 ? -1 : 1;
@@ -1743,6 +1927,7 @@ class AnboxStream {
       this._sendInputEvent("mouse-wheel", {
         x: movex,
         y: movey,
+        display_id: displayId,
       });
   }
 
@@ -2376,8 +2561,7 @@ class AnboxWebRTCManager {
     this._video_codec_id = null;
     this._audioOutput_codec_id = null;
     this._audioInput_codec_id = null;
-    // All video streams keyed by display index (parsed from server track name "video_N")
-    this._videoStreams = [];
+    this._videoStreams = {};
 
     this._stream = {
       video: options.enableVideoStream,
@@ -2484,7 +2668,7 @@ class AnboxWebRTCManager {
     this._onReady = (videoStream, audioStream) => {};
     this._onClose = () => {};
     // eslint-disable-next-line no-unused-vars
-    this._onExtraVideoTrack = (trackIndex, stream) => {};
+    this._onExtraVideoTrack = (displayId, stream) => {};
     this._onMicRequested = () => false;
     this._onCameraRequested = () => false;
     // eslint-disable-next-line no-unused-vars
