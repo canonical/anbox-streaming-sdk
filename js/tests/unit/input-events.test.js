@@ -80,7 +80,10 @@ test("rotated touch events are properly translated", () => {
     stop: jest.fn(),
   };
 
-  stream._dimensions = { playerWidth: 500, playerHeight: 1000 };
+  stream._displayStates[0].dimensions = {
+    playerWidth: 500,
+    playerHeight: 1000,
+  };
   expect(stream.rotate(0)).toEqual(true);
   let coord = stream._convertTouchInput(0, 0);
   expect(coord).toEqual({ x: 0, y: 0 });
@@ -94,7 +97,10 @@ test("rotated touch events are properly translated", () => {
     },
   );
 
-  stream._dimensions = { playerWidth: 1000, playerHeight: 500 };
+  stream._displayStates[0].dimensions = {
+    playerWidth: 1000,
+    playerHeight: 500,
+  };
   expect(stream.rotate(90)).toEqual(true);
   coord = stream._convertTouchInput(1000, 0);
   expect(stream._webrtcManager.sendControlMessage).toHaveBeenLastCalledWith(
@@ -107,7 +113,10 @@ test("rotated touch events are properly translated", () => {
     },
   );
 
-  stream._dimensions = { playerWidth: 500, playerHeight: 1000 };
+  stream._displayStates[0].dimensions = {
+    playerWidth: 500,
+    playerHeight: 1000,
+  };
   expect(stream.rotate(180)).toEqual(true);
   coord = stream._convertTouchInput(500, 1000);
   expect(coord).toEqual({ x: 500, y: 1000 });
@@ -121,7 +130,10 @@ test("rotated touch events are properly translated", () => {
     },
   );
 
-  stream._dimensions = { playerWidth: 1000, playerHeight: 500 };
+  stream._displayStates[0].dimensions = {
+    playerWidth: 1000,
+    playerHeight: 500,
+  };
   expect(stream.rotate(270)).toEqual(true);
   coord = stream._convertTouchInput(0, 500);
   expect(coord).toEqual({ x: 500, y: 0 });
@@ -210,7 +222,7 @@ test("can process mouse button events", () => {
   });
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   // Check disabled key combinations
   container.dispatchEvent(
@@ -233,7 +245,11 @@ test("can process mouse button events", () => {
   ); // scroll wheel button
   expect(mockFn.mock.calls.length).toEqual(1);
   expect(mockFn.mock.calls[0][0]).toEqual("input::mouse-button");
-  expect(mockFn.mock.calls[0][1]).toEqual({ button: 5, pressed: true });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    button: 5,
+    pressed: true,
+    display_id: 0,
+  });
 
   container.dispatchEvent(
     new PointerEvent("pointerup", {
@@ -245,7 +261,11 @@ test("can process mouse button events", () => {
   );
   expect(mockFn.mock.calls.length).toEqual(2);
   expect(mockFn.mock.calls[1][0]).toEqual("input::mouse-button");
-  expect(mockFn.mock.calls[1][1]).toEqual({ button: 5, pressed: false });
+  expect(mockFn.mock.calls[1][1]).toEqual({
+    button: 5,
+    pressed: false,
+    display_id: 0,
+  });
 });
 
 test("can process mouse move events", () => {
@@ -257,7 +277,7 @@ test("can process mouse move events", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   const event = new PointerEvent("pointermove", {
     clientX: 1000,
@@ -270,7 +290,13 @@ test("can process mouse move events", () => {
 
   expect(mockFn.mock.calls.length).toEqual(1);
   expect(mockFn.mock.calls[0][0]).toEqual("input::mouse-move");
-  expect(mockFn.mock.calls[0][1]).toEqual({ x: 250, y: 500, rx: 25, ry: 50 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    x: 250,
+    y: 500,
+    rx: 25,
+    ry: 50,
+    display_id: 0,
+  });
 });
 
 test("can process mouse move events with pointer lock", () => {
@@ -286,7 +312,7 @@ test("can process mouse move events with pointer lock", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   document.pointerLockElement = {};
 
@@ -303,7 +329,7 @@ test("can process mouse move events with pointer lock", () => {
   expect(mockFn.mock.calls[0][0]).toEqual("input::mouse-move");
   // With pointer lock enabled we should only see movement information
   // and absolute position
-  expect(mockFn.mock.calls[0][1]).toEqual({ rx: 25, ry: 50 });
+  expect(mockFn.mock.calls[0][1]).toEqual({ rx: 25, ry: 50, display_id: 0 });
 });
 
 test("can process mouse events translated to touch events", () => {
@@ -316,7 +342,7 @@ test("can process mouse events translated to touch events", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   let event = new PointerEvent("pointerdown", {
     clientX: 1000,
@@ -351,11 +377,21 @@ test("can process mouse events translated to touch events", () => {
   expect(mockFn.mock.calls.length).toEqual(3);
   expect(mockFn.mock.calls.length).toEqual(3);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[0][1]).toEqual({ x: 250, y: 500, id: 1 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    x: 250,
+    y: 500,
+    id: 1,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[1][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[1][1]).toEqual({ x: 251, y: 501, id: 1 });
+  expect(mockFn.mock.calls[1][1]).toEqual({
+    x: 251,
+    y: 501,
+    id: 1,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[2][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[2][1]).toEqual({ id: 1, last: true });
+  expect(mockFn.mock.calls[2][1]).toEqual({ id: 1, last: true, display_id: 0 });
 });
 
 test("ignore pointermove events after the pointerup event is fired on touch emulation", () => {
@@ -368,7 +404,7 @@ test("ignore pointermove events after the pointerup event is fired on touch emul
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   let event = new PointerEvent("pointerdown", {
     clientX: 1000,
@@ -404,9 +440,14 @@ test("ignore pointermove events after the pointerup event is fired on touch emul
   expect(mockFn.mock.calls.length).toEqual(2);
   expect(mockFn.mock.calls.length).toEqual(2);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[0][1]).toEqual({ x: 250, y: 500, id: 1 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    x: 250,
+    y: 500,
+    id: 1,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[1][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[1][1]).toEqual({ id: 1, last: true });
+  expect(mockFn.mock.calls[1][1]).toEqual({ id: 1, last: true, display_id: 0 });
 });
 
 test("can process touch events", () => {
@@ -418,7 +459,7 @@ test("can process touch events", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   // Simulate 3 touches, 0 end, 1 doesn't change, 2 moves
   let touches = [
@@ -433,14 +474,24 @@ test("can process touch events", () => {
 
   expect(mockFn.mock.calls.length).toEqual(3);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[0][1]).toEqual({ id: 0, x: 0, y: 0 });
+  expect(mockFn.mock.calls[0][1]).toEqual({ id: 0, x: 0, y: 0, display_id: 0 });
   expect(mockFn.mock.calls[1][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[1][1]).toEqual({ id: 1, x: 250, y: 500 });
+  expect(mockFn.mock.calls[1][1]).toEqual({
+    id: 1,
+    x: 250,
+    y: 500,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[2][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[2][1]).toEqual({ id: 2, x: 500, y: 1000 });
+  expect(mockFn.mock.calls[2][1]).toEqual({
+    id: 2,
+    x: 500,
+    y: 1000,
+    display_id: 0,
+  });
 
-  touches[2].clientX = stream._dimensions.playerOffsetLeft;
-  touches[2].clientY = stream._dimensions.playerOffsetTop;
+  touches[2].clientX = stream._displayStates[0].dimensions.playerOffsetLeft;
+  touches[2].clientY = stream._displayStates[0].dimensions.playerOffsetTop;
   container.dispatchEvent(new PointerEvent("pointermove", touches[2]));
 
   // Fire the `pointerup` for the first touch point will trigger `touch-end`
@@ -449,9 +500,13 @@ test("can process touch events", () => {
 
   expect(mockFn.mock.calls.length).toEqual(5);
   expect(mockFn.mock.calls[3][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[3][1]).toEqual({ id: 2, x: 0, y: 0 });
+  expect(mockFn.mock.calls[3][1]).toEqual({ id: 2, x: 0, y: 0, display_id: 0 });
   expect(mockFn.mock.calls[4][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[4][1]).toEqual({ id: 2, last: false });
+  expect(mockFn.mock.calls[4][1]).toEqual({
+    id: 2,
+    last: false,
+    display_id: 0,
+  });
 
   // Fire the `pointerup` for the remaining touch points the end
   // of multi-touch transfer. And the last point event that
@@ -461,9 +516,13 @@ test("can process touch events", () => {
 
   expect(mockFn.mock.calls.length).toEqual(7);
   expect(mockFn.mock.calls[5][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[5][1]).toEqual({ id: 1, last: false });
+  expect(mockFn.mock.calls[5][1]).toEqual({
+    id: 1,
+    last: false,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[6][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[6][1]).toEqual({ id: 0, last: true });
+  expect(mockFn.mock.calls[6][1]).toEqual({ id: 0, last: true, display_id: 0 });
 });
 
 test("can process invalid touch events", () => {
@@ -473,14 +532,14 @@ test("can process invalid touch events", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   let touch = { pointerType: "touch", pointerId: -1, clientX: 500, clientY: 0 };
   container.dispatchEvent(new PointerEvent("pointerdown", touch));
 
   expect(mockFn.mock.calls.length).toEqual(1);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[0][1]).toEqual({ id: 1, x: 0, y: 0 });
+  expect(mockFn.mock.calls[0][1]).toEqual({ id: 1, x: 0, y: 0, display_id: 0 });
 });
 
 test("mouse move when rotated", () => {
@@ -497,7 +556,7 @@ test("mouse move when rotated", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   // Mouse move event at bottom right corner
   let event = new PointerEvent("pointermove", {
@@ -510,7 +569,13 @@ test("mouse move when rotated", () => {
   container.dispatchEvent(event);
   expect(mockFn.mock.calls.length).toEqual(1);
   expect(mockFn.mock.calls[0][0]).toEqual("input::mouse-move");
-  expect(mockFn.mock.calls[0][1]).toEqual({ x: 500, y: 1000, rx: 25, ry: 50 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    x: 500,
+    y: 1000,
+    rx: 25,
+    ry: 50,
+    display_id: 0,
+  });
 
   expect(stream.rotate(-90)).toEqual(true);
   event = new PointerEvent("pointermove", {
@@ -522,7 +587,13 @@ test("mouse move when rotated", () => {
   event.__defineGetter__("movementY", () => 100);
   container.dispatchEvent(event);
   expect(mockFn.mock.calls[2][0]).toEqual("input::mouse-move");
-  expect(mockFn.mock.calls[2][1]).toEqual({ x: 0, y: 500, rx: 25, ry: 50 });
+  expect(mockFn.mock.calls[2][1]).toEqual({
+    x: 0,
+    y: 500,
+    rx: 25,
+    ry: 50,
+    display_id: 0,
+  });
 
   expect(stream.rotate(-180)).toEqual(true);
   event = new PointerEvent("pointermove", {
@@ -534,7 +605,13 @@ test("mouse move when rotated", () => {
   event.__defineGetter__("movementY", () => 100);
   container.dispatchEvent(event);
   expect(mockFn.mock.calls[4][0]).toEqual("input::mouse-move");
-  expect(mockFn.mock.calls[4][1]).toEqual({ x: 500, y: 1000, rx: 25, ry: 50 });
+  expect(mockFn.mock.calls[4][1]).toEqual({
+    x: 500,
+    y: 1000,
+    rx: 25,
+    ry: 50,
+    display_id: 0,
+  });
 
   expect(stream.rotate(90)).toEqual(true);
   event = new PointerEvent("pointermove", {
@@ -546,7 +623,13 @@ test("mouse move when rotated", () => {
   event.__defineGetter__("movementY", () => 100);
   container.dispatchEvent(event);
   expect(mockFn.mock.calls[6][0]).toEqual("input::mouse-move");
-  expect(mockFn.mock.calls[6][1]).toEqual({ x: 0, y: 500, rx: 25, ry: 50 });
+  expect(mockFn.mock.calls[6][1]).toEqual({
+    x: 0,
+    y: 500,
+    rx: 25,
+    ry: 50,
+    display_id: 0,
+  });
 });
 
 test("mouse move when rotated and translated to touch events", () => {
@@ -563,7 +646,7 @@ test("mouse move when rotated and translated to touch events", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   // Enable emulation
   stream.enableTouchEmulation();
@@ -579,7 +662,12 @@ test("mouse move when rotated and translated to touch events", () => {
   container.dispatchEvent(event);
   expect(mockFn.mock.calls.length).toEqual(1);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[0][1]).toEqual({ x: 500, y: 1000, id: 0 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    x: 500,
+    y: 1000,
+    id: 0,
+    display_id: 0,
+  });
 
   // Mouse move event at bottom right corner
   event = new PointerEvent("pointermove", {
@@ -593,7 +681,12 @@ test("mouse move when rotated and translated to touch events", () => {
   container.dispatchEvent(event);
   expect(mockFn.mock.calls.length).toEqual(2);
   expect(mockFn.mock.calls[1][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[1][1]).toEqual({ x: 500, y: 1000, id: 0 });
+  expect(mockFn.mock.calls[1][1]).toEqual({
+    x: 500,
+    y: 1000,
+    id: 0,
+    display_id: 0,
+  });
 
   expect(stream.rotate(90)).toEqual(true);
   event = new PointerEvent("pointermove", {
@@ -606,7 +699,12 @@ test("mouse move when rotated and translated to touch events", () => {
   event.__defineGetter__("movementY", () => 100);
   container.dispatchEvent(event);
   expect(mockFn.mock.calls[3][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[3][1]).toEqual({ x: 500, y: 1000, id: 0 });
+  expect(mockFn.mock.calls[3][1]).toEqual({
+    x: 500,
+    y: 1000,
+    id: 0,
+    display_id: 0,
+  });
 
   expect(stream.rotate(180)).toEqual(true);
   event = new PointerEvent("pointermove", {
@@ -619,7 +717,7 @@ test("mouse move when rotated and translated to touch events", () => {
   event.__defineGetter__("movementY", () => 100);
   container.dispatchEvent(event);
   expect(mockFn.mock.calls[5][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[5][1]).toEqual({ x: 0, y: 0, id: 0 });
+  expect(mockFn.mock.calls[5][1]).toEqual({ x: 0, y: 0, id: 0, display_id: 0 });
 
   expect(stream.rotate(-90)).toEqual(true);
   event = new PointerEvent("pointermove", {
@@ -632,7 +730,12 @@ test("mouse move when rotated and translated to touch events", () => {
   event.__defineGetter__("movementY", () => 100);
   container.dispatchEvent(event);
   expect(mockFn.mock.calls[7][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[7][1]).toEqual({ x: 500, y: 1000, id: 0 });
+  expect(mockFn.mock.calls[7][1]).toEqual({
+    x: 500,
+    y: 1000,
+    id: 0,
+    display_id: 0,
+  });
 });
 
 test("touch events when rotated", () => {
@@ -649,7 +752,7 @@ test("touch events when rotated", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   container.dispatchEvent(
     new PointerEvent("pointerdown", {
@@ -661,7 +764,12 @@ test("touch events when rotated", () => {
   );
   expect(mockFn.mock.calls.length).toEqual(1);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[0][1]).toEqual({ id: 0, x: 500, y: 1000 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    id: 0,
+    x: 500,
+    y: 1000,
+    display_id: 0,
+  });
 
   expect(stream.rotate(90)).toEqual(true);
   container.dispatchEvent(
@@ -673,7 +781,7 @@ test("touch events when rotated", () => {
     }),
   );
   expect(mockFn.mock.calls[2][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[2][1]).toEqual({ id: 0, x: 0, y: 0 });
+  expect(mockFn.mock.calls[2][1]).toEqual({ id: 0, x: 0, y: 0, display_id: 0 });
 
   expect(stream.rotate(180)).toEqual(true);
   container.dispatchEvent(
@@ -687,7 +795,12 @@ test("touch events when rotated", () => {
   expect(mockFn.mock.calls[4][0]).toEqual("input::touch-move");
   // The pionter id will be auto-adjusted to 2 which is the minimal
   // available pointer Id being passed to the Android container
-  expect(mockFn.mock.calls[4][1]).toEqual({ id: 0, x: 500, y: 1000 });
+  expect(mockFn.mock.calls[4][1]).toEqual({
+    id: 0,
+    x: 500,
+    y: 1000,
+    display_id: 0,
+  });
 
   expect(stream.rotate(270)).toEqual(true);
   container.dispatchEvent(
@@ -699,7 +812,7 @@ test("touch events when rotated", () => {
     }),
   );
   expect(mockFn.mock.calls[6][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[6][1]).toEqual({ id: 0, x: 0, y: 0 });
+  expect(mockFn.mock.calls[6][1]).toEqual({ id: 0, x: 0, y: 0, display_id: 0 });
 });
 
 test("single touch events with increment id", () => {
@@ -711,7 +824,7 @@ test("single touch events with increment id", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   let touchEvent = {
     pointerId: 3,
@@ -740,11 +853,21 @@ test("single touch events with increment id", () => {
 
   expect(mockFn.mock.calls.length).toEqual(3);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[0][1]).toEqual({ id: 0, x: 0, y: 500 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    id: 0,
+    x: 0,
+    y: 500,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[1][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[1][1]).toEqual({ id: 0, x: 250, y: 750 });
+  expect(mockFn.mock.calls[1][1]).toEqual({
+    id: 0,
+    x: 250,
+    y: 750,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[2][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[2][1]).toEqual({ id: 0, last: true });
+  expect(mockFn.mock.calls[2][1]).toEqual({ id: 0, last: true, display_id: 0 });
 
   touchEvent = {
     pointerId: 4,
@@ -773,11 +896,21 @@ test("single touch events with increment id", () => {
 
   expect(mockFn.mock.calls.length).toEqual(6);
   expect(mockFn.mock.calls[3][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[3][1]).toEqual({ id: 0, x: 0, y: 500 });
+  expect(mockFn.mock.calls[3][1]).toEqual({
+    id: 0,
+    x: 0,
+    y: 500,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[4][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[4][1]).toEqual({ id: 0, x: 250, y: 750 });
+  expect(mockFn.mock.calls[4][1]).toEqual({
+    id: 0,
+    x: 250,
+    y: 750,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[5][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[5][1]).toEqual({ id: 0, last: true });
+  expect(mockFn.mock.calls[5][1]).toEqual({ id: 0, last: true, display_id: 0 });
 });
 
 test("multiple touch events with increment id", () => {
@@ -789,7 +922,7 @@ test("multiple touch events with increment id", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   // Multi touch points
   let touchEvent = {
@@ -845,17 +978,41 @@ test("multiple touch events with increment id", () => {
 
   expect(mockFn.mock.calls.length).toEqual(6);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[0][1]).toEqual({ id: 0, x: 0, y: 500 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    id: 0,
+    x: 0,
+    y: 500,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[1][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[1][1]).toEqual({ id: 1, x: 250, y: 750 });
+  expect(mockFn.mock.calls[1][1]).toEqual({
+    id: 1,
+    x: 250,
+    y: 750,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[2][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[2][1]).toEqual({ id: 0, x: 100, y: 625 });
+  expect(mockFn.mock.calls[2][1]).toEqual({
+    id: 0,
+    x: 100,
+    y: 625,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[3][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[3][1]).toEqual({ id: 1, x: 375, y: 875 });
+  expect(mockFn.mock.calls[3][1]).toEqual({
+    id: 1,
+    x: 375,
+    y: 875,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[4][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[4][1]).toEqual({ id: 0, last: false });
+  expect(mockFn.mock.calls[4][1]).toEqual({
+    id: 0,
+    last: false,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[5][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[5][1]).toEqual({ id: 1, last: true });
+  expect(mockFn.mock.calls[5][1]).toEqual({ id: 1, last: true, display_id: 0 });
 });
 
 test("ignore touch events outside of video element", () => {
@@ -871,7 +1028,7 @@ test("ignore touch events outside of video element", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   let touchEvent = {
     pointerId: 0,
@@ -914,7 +1071,7 @@ test("trigger pointer events when inputs leave the video container", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   // Fire 'pointerdown' event to start tracking with the touch point
   let touchEvent = {
@@ -988,15 +1145,30 @@ test("trigger pointer events when inputs leave the video container", () => {
 
   expect(mockFn.mock.calls.length).toEqual(5);
   expect(mockFn.mock.calls[0][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[0][1]).toEqual({ id: 0, x: 125, y: 750 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    id: 0,
+    x: 125,
+    y: 750,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[1][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[1][1]).toEqual({ id: 0, last: true });
+  expect(mockFn.mock.calls[1][1]).toEqual({ id: 0, last: true, display_id: 0 });
   expect(mockFn.mock.calls[2][0]).toEqual("input::touch-start");
-  expect(mockFn.mock.calls[2][1]).toEqual({ id: 0, x: 500, y: 1000 });
+  expect(mockFn.mock.calls[2][1]).toEqual({
+    id: 0,
+    x: 500,
+    y: 1000,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[3][0]).toEqual("input::touch-move");
-  expect(mockFn.mock.calls[3][1]).toEqual({ id: 0, x: 0, y: 500 });
+  expect(mockFn.mock.calls[3][1]).toEqual({
+    id: 0,
+    x: 0,
+    y: 500,
+    display_id: 0,
+  });
   expect(mockFn.mock.calls[4][0]).toEqual("input::touch-end");
-  expect(mockFn.mock.calls[4][1]).toEqual({ id: 0, last: true });
+  expect(mockFn.mock.calls[4][1]).toEqual({ id: 0, last: true, display_id: 0 });
 });
 
 test("control channel is closed when rotate a pointer event", () => {
@@ -1010,7 +1182,7 @@ test("control channel is closed when rotate a pointer event", () => {
   stream._webrtcManager.sendControlMessage = mockFn;
   stream._registerControls();
   stream._onResize();
-  const container = document.getElementById(stream._containerID);
+  const container = document.getElementById(stream._containerIDs[0]);
 
   // Mouse move event at bottom right corner
   let event = new PointerEvent("pointermove", {
@@ -1023,7 +1195,13 @@ test("control channel is closed when rotate a pointer event", () => {
   container.dispatchEvent(event);
   expect(mockFn.mock.calls.length).toEqual(1);
   expect(mockFn.mock.calls[0][0]).toEqual("input::mouse-move");
-  expect(mockFn.mock.calls[0][1]).toEqual({ x: 500, y: 1000, rx: 25, ry: 50 });
+  expect(mockFn.mock.calls[0][1]).toEqual({
+    x: 500,
+    y: 1000,
+    rx: 25,
+    ry: 50,
+    display_id: 0,
+  });
 
   expect(stream.rotate(90)).toEqual(false);
 });

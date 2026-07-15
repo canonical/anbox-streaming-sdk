@@ -71,9 +71,15 @@ afterEach(() => {
 test("SDK properly checks constructor options", () => {
   expect(() => new AnboxStream()).toThrow("missing options");
 
+  // targetElement is optional since 1.31.0.
+  // null/omitted is valid for multi-display case.
   sdkOptions.targetElement = null;
+  expect(() => new AnboxStream(sdkOptions)).not.toThrow();
+
+  // Non-string targetElement is rejected
+  sdkOptions.targetElement = ["display0", "display1"];
   expect(() => new AnboxStream(sdkOptions)).toThrow(
-    "missing targetElement parameter",
+    "targetElement must be a string",
   );
 
   sdkOptions.targetElement = "nonexistent";
@@ -155,7 +161,7 @@ test("Video container with no size specified", () => {
   expect(() => new AnboxStream(options)).not.toThrow();
   expect(console.error).toHaveBeenCalledWith(
     expect.stringContaining(
-      "AnboxStream: video container element misses size. Please see https://canonical.com/anbox-cloud/docs/tutorial/stream-client",
+      '[AnboxStream] video container element "baz" misses size. Please see https://canonical.com/anbox-cloud/docs/tutorial/stream-client',
     ),
   );
   global.console.error.mockRestore();
@@ -215,13 +221,13 @@ test("video element should take all available space", () => {
   container.appendChild(video);
 
   stream._onResize();
-  let dimensions = stream._dimensions;
+  let dimensions = stream._displayStates[0].dimensions;
   expect(dimensions.playerWidth).toEqual(1000);
   expect(dimensions.playerHeight).toEqual(2000);
 
   // Perform a rotation
   expect(stream.rotate(90)).toEqual(true);
-  dimensions = stream._dimensions;
+  dimensions = stream._displayStates[0].dimensions;
 
   expect(video.style.transform).toEqual("rotate(90deg)");
   expect(stream._webrtcManager.sendControlMessage).toHaveBeenCalledWith(
@@ -631,7 +637,7 @@ test("player respects the vertical aligment settings", () => {
     container.appendChild(video);
 
     stream._onResize();
-    let dimensions = stream._dimensions;
+    let dimensions = stream._displayStates[0].dimensions;
     expect(dimensions.playerWidth).toEqual(2000);
     expect(dimensions.playerHeight).toEqual(1000);
 
