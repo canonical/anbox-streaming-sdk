@@ -790,6 +790,12 @@ class AnboxStream {
     if (this._nullOrUndef(options.callbacks.vhalReady))
       options.callbacks.vhalReady = () => {};
 
+    if (this._nullOrUndef(options.callbacks.videoTrackAdded))
+      options.callbacks.videoTrackAdded = () => {};
+
+    if (this._nullOrUndef(options.callbacks.videoTrackRemoved))
+      options.callbacks.videoTrackRemoved = () => {};
+
     if (!this._nullOrUndef(options.dataChannels)) {
       if (Object.keys(options.dataChannels).length > maxNumberOfDataChannels) {
         throw newError(
@@ -914,7 +920,37 @@ class AnboxStream {
     }
   }
 
+  // Fire ready() only when display 0 has played AND all secondary display
+  // tracks that arrived before display 0 played have also started playing.
+  // _pendingReadyCount tracks how many secondary tracks are still pending.
+  _checkReady() {
+    if (this._primaryDisplayReady && this._pendingReadyCount === 0) {
+      this._options.callbacks.ready();
+    }
+  }
+
   _createMedia() {
+    // In fully dynamic mode (no targetElement) the video element is not
+    // created here. The WebRTC source is stored in _pendingVideoTracks[0]
+    // by _webrtcReady() and injected into the DOM by attachDisplay(0).
+    if (!this._containerID) {
+      if (this._options.stream.audio && this._options.devices.speaker) {
+        const audio = document.createElement("audio");
+        audio.id = this._audioID;
+        audio.autoplay = true;
+        audio.controls = false;
+        if (!this._options.stream.video) {
+          audio.onplay = () => {
+            this._primaryDisplayReady = true;
+            this._checkReady();
+            this._options.callbacks.videoTrackAdded(0);
+          };
+        }
+        document.body.appendChild(audio);
+      }
+      return;
+    }
+
     let mediaContainer = document.getElementById(this._containerID);
     // We set the container as relative so the video element is absolute to it and not something else
     mediaContainer.style.position = "relative";
@@ -928,7 +964,7 @@ class AnboxStream {
       video.style.margin = "0";
       video.style.height = "auto";
       video.style.width = "auto";
-      // The video element is sized based on the dimensions of its container. Settings its position to "absolute"
+      // The video element is sized based on the dimensions of its container. Setting its position to "absolute"
       // removes it from the flow, so the video element cannot change its parent dimensions.
       video.style.position = "absolute";
       video.muted = true;
@@ -941,7 +977,9 @@ class AnboxStream {
       video.onplay = () => {
         this._onResize();
         this._registerControls();
-        this._options.callbacks.ready();
+        this._primaryDisplayReady = true;
+        this._checkReady();
+        this._options.callbacks.videoTrackAdded(0);
       };
       video.onloadedmetadata = () => {
         // NOTE: the video frame may not be received or fully decoded yet
@@ -993,7 +1031,9 @@ class AnboxStream {
       audio.controls = false;
       if (!this._options.stream.video) {
         audio.onplay = () => {
-          this._options.callbacks.ready();
+          this._primaryDisplayReady = true;
+          this._checkReady();
+          this._options.callbacks.videoTrackAdded(0);
         };
       }
       mediaContainer.appendChild(audio);
@@ -1023,7 +1063,9 @@ class AnboxStream {
     }
 
     if (!this._options.stream.video && !this._options.stream.audio) {
-      this._options.callbacks.ready();
+      this._primaryDisplayReady = true;
+      this._checkReady();
+      this._options.callbacks.videoTrackAdded(0);
     }
   }
 
