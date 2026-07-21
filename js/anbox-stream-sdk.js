@@ -1891,9 +1891,27 @@ class AnboxStream {
    * @private
    */
   _adjustPointerCoordsToVideoBoundaries(event, displayId) {
-    const videoId = displayId === 0
-      ? this._videoID
-      : `${this._videoID}-display-${displayId}`;
+    const state = this._displayStates[displayId];
+    if (!state) return false;
+
+    if (displayId === 0 && !this._multiDisplayActive) {
+      const container = document.getElementById(this._containerIDs[0]);
+      if (!container) return false;
+      const dim = state.dimensions;
+      if (!dim) return false;
+      const cRect = container.getBoundingClientRect();
+      event.clientX = Math.round(
+        event.clientX - cRect.left - dim.playerOffsetLeft,
+      );
+      event.clientY = Math.round(
+        event.clientY - cRect.top - dim.playerOffsetTop,
+      );
+      return true;
+    }
+
+    // Multi-display mode: use the video element's actual rendered bounding rect.
+    const videoId =
+      displayId === 0 ? this._videoID : `${this._videoID}-display-${displayId}`;
     const video = document.getElementById(videoId);
     if (!video || !video.videoWidth || !video.videoHeight) return false;
 
@@ -1915,25 +1933,21 @@ class AnboxStream {
     // Keep cached dimensions in sync for
     //  1. _isPointerEventOutOfBounds
     //  2. _translateLocalCoordsToRemoteCoords
-    const state = this._displayStates[displayId];
-    if (state) {
-      if (!state.dimensions) {
-        state.dimensions = {
-          videoWidth: video.videoWidth,
-          videoHeight: video.videoHeight,
-          scalePercentage: scale,
-          playerWidth: renderedWidth,
-          playerHeight: renderedHeight,
-          playerOffsetLeft: contentOffsetX,
-          playerOffsetTop: contentOffsetY,
-        };
-      } else {
-        state.dimensions.scalePercentage = scale;
-        state.dimensions.playerWidth = renderedWidth;
-        state.dimensions.playerHeight = renderedHeight;
-        state.dimensions.playerOffsetLeft = contentOffsetX;
-        state.dimensions.playerOffsetTop = contentOffsetY;
-      }
+    const newValues = {
+      scalePercentage: scale,
+      playerWidth: renderedWidth,
+      playerHeight: renderedHeight,
+      playerOffsetLeft: contentOffsetX,
+      playerOffsetTop: contentOffsetY,
+    };
+    if (!state.dimensions) {
+      state.dimensions = {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        ...newValues,
+      };
+    } else {
+      state.dimensions = { ...state.dimensions, ...newValues };
     }
 
     return true;
@@ -1950,7 +1964,11 @@ class AnboxStream {
     const dim = this._displayStates[displayId].dimensions;
 
     if (event.pointerType === "touch") {
-      const pos = this._convertTouchInput(event.clientX, event.clientY);
+      const pos = this._convertTouchInput(
+        event.clientX,
+        event.clientY,
+        displayId,
+      );
       event.clientX = pos.x;
       event.clientY = pos.y;
     }
