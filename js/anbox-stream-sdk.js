@@ -86,7 +86,12 @@ class AnboxStream {
    * displays its video & audio feed in an HTML5 player
    * @param options: {object}
    * @param options.connector {object} WebRTC Stream connector.
-   * @param options.targetElement {string} ID of the DOM element to attach the video to.
+   * @param [options.targetElement] {string} ID of the DOM element to attach the primary (display 0)
+   *   video to. When provided the SDK operates in legacy single-display mode: the primary video is
+   *   injected automatically, and the `videoTrackAdded` callback fires for every display that arrives
+   *   (including display 0). When omitted the SDK operates in fully dynamic mode: the caller MUST
+   *   call `attachDisplay(displayId, containerId)` for every display, including display 0, in
+   *   response to the `videoTrackAdded` callback.
    * @param [options.verticalAlignment=center] {top | center | bottom} Vertical alignment of the video element in its container.
    * @param [options.fullScreen=false] {boolean} Stream video in full screen mode.
    * @param [options.deviceType] {string} Send the type of device the SDK is running on to the Android container.
@@ -124,6 +129,13 @@ class AnboxStream {
    * @param [options.callbacks.requestCameraAccess=none] {function} Called when Android application tries to open camera device for video streaming.
    * @param [options.callbacks.requestMicrophoneAccess=none] {function} Called when Android application tries to open microphone device for video streaming.
    * @param [options.callbacks.vhalReady=none] {function} Called when the VHAL manager has been initialised.
+   * @param [options.callbacks.videoTrackAdded=none] {function} Called when a display video track is
+   *   added. Receives (displayId). Fires for every display, starting from display 0.
+   *   In dynamic mode (no `targetElement`): call `sdk.attachDisplay(displayId, containerId)`
+   *   after the container is in the DOM to have the SDK inject the video element.
+   *   In legacy mode (`targetElement` provided): display 0 is already injected; call
+   *   `sdk.attachDisplay(displayId, containerId)` for displays 1 and above.
+   * @param [options.callbacks.videoTrackRemoved=none] {function} Called when a display video track is removed. Receives (displayId).
    * @param [options.dataChannels] {object} Map of data channels used to exchange out of band data between WebRTC client and application running in Android container.
    * @param [options.dataChannels[name].callbacks] {object} A list of event handling callbacks of one specific data channel.
    * @param [options.dataChannels[name].callbacks.open=none] {function} A callback function that is triggered when the data channel is opened.
@@ -333,6 +345,106 @@ class AnboxStream {
   disconnect() {
     this._stopStreaming();
     this._options.connector.disconnect();
+  }
+
+  /**
+   * Attach a consumer-provided container to a display.
+   *
+   * In legacy mode (`targetElement` provided): display 0 is managed by the SDK,
+   * so this should only be called for displays with index >= 1, in response to
+   * the `videoTrackAdded` callback.
+   *
+   * In fully dynamic mode (no `targetElement`): must be called for every display
+   * including display 0, in response to the `videoTrackAdded` callback. The SDK
+   * will inject a `<video>` element into the container, set up input routing,
+   * and begin computing dimensions for that display.
+   *
+   * @param {number} displayId - The display id reported by `videoTrackAdded`.
+   * @param {string} containerId  - The DOM `id` of the container element to
+   *                                inject the video into. The element must
+   *                                already be present in the DOM.
+   */
+  attachDisplay(displayId, containerId) {
+    if (displayId === 0 && this._options.targetElement) {
+      // Legacy mode: display 0 is already managed by targetElement. Nothing to do.
+      return;
+    }
+
+    const stream = this._pendingVideoTracks[displayId];
+    if (!stream) {
+      console.warn(
+        `[AnboxStream] attachDisplay(${displayId}) called but no pending stream. ` +
+          "Call this method from within the videoTrackAdded callback.",
+      );
+      return;
+    }
+
+    const container = document.getElementById(containerId);
+    if (!container) {
+      console.error(
+        `[AnboxStream] attachDisplay(${displayId}): container #${containerId} not found in DOM.`,
+      );
+      return;
+    }
+
+    delete this._pendingVideoTracks[displayId];
+
+    container.style.position = "relative";
+    container.style.overflow = "hidden";
+    container.style.touchAction = "none";
+
+    this._containerIDs[displayId] = containerId;
+
+    if (!(displayId in this._displayStates)) {
+      this._displayStates[displayId] = {
+        dimensions: null,
+        activeTouchPointers: [],
+        pointerIdsMapper: {},
+        primaryTouchId: 0,
+        pointersOutofBounds: {},
+      };
+    }
+
+    this._multiDisplayActive = true;
+
+    const videoId =
+      displayId === 0 ? this._videoID : `${this._videoID}-display-${displayId}`;
+    const video = this._createExtraVideoElement(videoId, stream);
+    container.appendChild(video);
+
+    const computeDims = () =>
+      this._computeMultiDisplayDimensions(video, container, displayId);
+    video.addEventListener("loadedmetadata", computeDims);
+    video.addEventListener("resize", computeDims);
+    video.addEventListener(
+      "play",
+      () => {
+        if (displayId === 0) {
+          this._registerControls();
+          this._primaryDisplayReady = true;
+        } else {
+          this._pendingReadyCount = Math.max(0, this._pendingReadyCount - 1);
+        }
+        this._checkReady();
+      },
+      { once: true },
+    );
+
+    // Recompute when the container cell resizes.
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => {
+        if (video.videoWidth > 0 && video.videoHeight > 0) computeDims();
+      });
+      ro.observe(container);
+    }
+
+    if (displayId !== 0) {
+      this._registerInputHandlers(displayId, container);
+
+      // Recompute all display dimensions now that the layout has changed.
+      // Use a short timeout so the browser has flushed the new layout.
+      setTimeout(() => this._onResize(), 0);
+    }
   }
 
   /**
@@ -834,23 +946,24 @@ class AnboxStream {
   _validateOptions(options) {
     this._validateApiVersion(options.apiVersion);
 
-    if (this._nullOrUndef(options.targetElement)) {
-      throw newError(
-        "missing targetElement parameter",
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT,
-      );
+    if (!this._nullOrUndef(options.targetElement)) {
+      if (typeof options.targetElement !== "string") {
+        throw newError(
+          "targetElement must be a string ID",
+          ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT,
+        );
+      }
+      const container = document.getElementById(options.targetElement);
+      if (container === null) {
+        throw newError(
+          `target element "${options.targetElement}" does not exist`,
+          ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT,
+        );
+      } else if (container.clientWidth === 0 || container.clientHeight === 0)
+        console.error(
+          `[AnboxStream] video container element "${options.targetElement}" misses size. Please see https://canonical.com/anbox-cloud/docs/tutorial/stream-client`,
+        );
     }
-
-    const container = document.getElementById(options.targetElement);
-    if (container === null) {
-      throw newError(
-        `target element "${options.targetElement}" does not exist`,
-        ANBOX_STREAM_SDK_ERROR_INVALID_ARGUMENT,
-      );
-    } else if (container.clientWidth == 0 || container.clientHeight == 0)
-      console.error(
-        "AnboxStream: video container element misses size. Please see https://canonical.com/anbox-cloud/docs/tutorial/stream-client",
-      );
 
     if (this._nullOrUndef(options.connector)) {
       throw newError(
@@ -1014,13 +1127,23 @@ class AnboxStream {
 
   _webrtcReady(videoSource, audioSource) {
     if (this._options.stream.video) {
-      const video = document.getElementById(this._videoID);
-      video.srcObject = videoSource;
+      if (!this._options.targetElement) {
+        // Guard against _webrtcReady being called again on subsequent track
+        // arrivals (the WebRTC manager re-fires the ready callback for every
+        // track once the primary conditions are satisfied).
+        if (!(0 in this._pendingVideoTracks)) {
+          this._pendingVideoTracks[0] = videoSource;
+          this._options.callbacks.videoTrackAdded(0);
+        }
+      } else {
+        const video = document.getElementById(this._videoID);
+        video.srcObject = videoSource;
 
-      // Expliclity to call play() method to the video element if it's hidden,
-      // otherwise video can be still buffered but not playback, which caused
-      // the video.onplay callback won't be triggered at all.
-      if (video.style.display === "none") video.play();
+        // Expliclity to call play() method to the video element if it's hidden,
+        // otherwise video can be still buffered but not playback, which caused
+        // the video.onplay callback won't be triggered at all.
+        if (video.style.display === "none") video.play();
+      }
     }
 
     if (this._options.stream.audio && this._options.devices.speaker) {
@@ -1035,12 +1158,124 @@ class AnboxStream {
     }
   }
 
+  _onExtraVideoTrack(displayId, stream) {
+    const videoId = `${this._videoID}-display-${displayId}`;
+    if (document.getElementById(videoId)) {
+      document.getElementById(videoId).srcObject = stream;
+      return;
+    }
+
+    this._pendingReadyCount++;
+    this._pendingVideoTracks[displayId] = stream;
+    this._options.callbacks.videoTrackAdded(displayId);
+  }
+
+  _activateMultiDisplayGrid(container) {
+    this._multiDisplayActive = true;
+
+    // Wrap the primary video in a dedicated cell div so it becomes one
+    // equal grid item alongside the additional display cells.
+    const cell = document.createElement("div");
+    cell.id = `${this._videoID}-cell-0`;
+    cell.className = "anbox-stream-cell";
+    cell.style.position = "relative";
+    cell.style.overflow = "hidden";
+
+    const primaryVideo = document.getElementById(this._videoID);
+    if (primaryVideo) {
+      // Make the primary video fill its new cell via absolute positioning,
+      // consistent with how secondary videos are rendered.
+      primaryVideo.style.position = "absolute";
+      primaryVideo.style.inset = "0";
+      primaryVideo.style.width = "100%";
+      primaryVideo.style.height = "100%";
+      primaryVideo.style.objectFit = "contain";
+      primaryVideo.style.top = "";
+      primaryVideo.style.left = "";
+      primaryVideo.style.maxWidth = "";
+      primaryVideo.style.maxHeight = "";
+      cell.appendChild(primaryVideo);
+    }
+    container.insertBefore(cell, container.firstChild);
+
+    // Move the display 0 input zone from the outer container to cell-0 so
+    // pointer events are scoped to the actual video area.
+    this._unregisterInputHandlers(0);
+    this._containerIDs[0] = cell.id;
+    this._registerInputHandlers(0, cell);
+
+    container.style.display = "grid";
+    container.style.width = "100%";
+    container.style.height = "100%";
+    container.style.gap = "0";
+    container.style.overflow = "hidden";
+    container.style.boxSizing = "border-box";
+  }
+
+  _createExtraVideoElement(id, stream) {
+    const video = document.createElement("video");
+    video.id = id;
+    video.style.margin = "0";
+    video.style.position = "absolute";
+    video.muted = true;
+    video.autoplay = true;
+    video.controls = false;
+    video.playsInline = true;
+    video.setAttribute("oncontextmenu", "return false;");
+    video.srcObject = stream;
+    return video;
+  }
+
+  _updateGridColumns(container) {
+    const count = container.querySelectorAll(".anbox-stream-cell").length;
+    const cols = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / cols);
+    container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    container.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+  }
+
   _removeMedia() {
+    this._multiDisplayActive = false;
+    this._primaryDisplayReady = false;
+    this._pendingReadyCount = 0;
+
+    // Notify consumer for each attached display (highest id first), then
+    // clean up any pending streams that were never attached.
+    const attachedIds = Object.keys(this._containerIDs)
+      .map(Number)
+      .sort((a, b) => b - a);
+    for (const displayId of attachedIds) {
+      this._options.callbacks.videoTrackRemoved(displayId);
+    }
+    this._pendingVideoTracks = {};
+
+    // First remove additional video elements injected by attachDisplay,
+    // then Remove primary video and audio elements.
+    for (const displayId of attachedIds) {
+      if (displayId === 0) continue;
+      const el = document.getElementById(
+        `${this._videoID}-display-${displayId}`,
+      );
+      if (el) el.remove();
+    }
     const video = document.getElementById(this._videoID);
     const audio = document.getElementById(this._audioID);
-
     if (video) video.remove();
     if (audio) audio.remove();
+
+    const initialContainerID = this._options.targetElement || null;
+    this._containerIDs = initialContainerID ? { 0: initialContainerID } : {};
+    this._displayStates = initialContainerID
+      ? {
+          0: {
+            dimensions: null,
+            activeTouchPointers: [],
+            pointerIdsMapper: {},
+            primaryTouchId: 0,
+            pointersOutofBounds: {},
+          },
+        }
+      : {};
   }
 
   _stopStreaming() {
@@ -1368,15 +1603,20 @@ class AnboxStream {
 
   _onResize() {
     const video = document.getElementById(this._videoID);
-    const container = document.getElementById(this._containerID);
+    const container = document.getElementById(
+      this._options.targetElement || this._containerIDs[0],
+    );
     if (video === null || container === null) return;
     if (video.videoWidth === 0 || video.videoHeight === 0) return;
 
     // In multi-display mode, recompute all attached displays so that any
     // layout changes (new display added, window resize) are reflected.
     if (this._multiDisplayActive) {
-      this._computeMultiDisplayDimensions(video, container, 0);
-      const extraIds = Object.keys(this._containerIDs).map(Number).filter(i => i > 0);
+      const cell = document.getElementById(this._containerIDs[0]) || container;
+      this._computeMultiDisplayDimensions(video, cell, 0);
+      const extraIds = Object.keys(this._containerIDs)
+        .map(Number)
+        .filter((i) => i > 0);
       for (const i of extraIds) {
         const secId = `${this._videoID}-display-${i}`;
         const secVideo = document.getElementById(secId);
@@ -1637,11 +1877,15 @@ class AnboxStream {
    * removes the various offsets so the (0,0) coordinate corresponds to
    * the top left corner of the video content for the given display.
    *
-   * Uses _containerIDs[displayId] as the reference element so that in
-   * dynamic single-container mode, coordinates are computed against the
-   * correct cell div (not the outer container), even after the grid layout
-   * changes. Scale and offsets are recomputed live to avoid stale values
-   * when containers resize (e.g. secondary displays appearing).
+   * For primary display in single-display mode, uses the cached dimensions
+   * computed by _onResize (which correctly handles CSS rotation) together
+   * with the container's bounding rect.
+   *
+   * In multi-display mode, display 0's video element is explicitly sized and
+   * positioned in pixels by _computeMultiDisplayDimensions (just like extra
+   * displays), so we use the video element's getBoundingClientRect directly.
+   * This avoids any dependency on the outer grid container's dimensions.
+   *
    * @param event
    * @param {number} displayId
    * @private
@@ -2573,6 +2817,7 @@ class AnboxWebRTCManager {
     this._video_codec_id = null;
     this._audioOutput_codec_id = null;
     this._audioInput_codec_id = null;
+    // All video streams keyed by display id
     this._videoStreams = {};
 
     this._stream = {
@@ -2718,13 +2963,13 @@ class AnboxWebRTCManager {
 
   /**
    * @callback onExtraVideoTrack
-   * @param displayId {number} Zero-based display index derived from the server-assigned
-   *   track name ("video_N"). Stable across dynamic display add/remove.
+   * @param displayId {number} zero-based display id derived from the server-assigned
+   *   track name.
    * @param stream {MediaStream} Stream to attach to the extra video element
    */
   /**
    * Called when an additional video track is received.
-   * The display index is parsed from the server-assigned track name and is
+   * The display id is parsed from the server-assigned track name and is
    * stable even when displays are added or removed dynamically.
    * @param callback {onExtraVideoTrack}
    */
@@ -3504,17 +3749,14 @@ class AnboxWebRTCManager {
     const kind = event.track.kind;
     if (kind === "video") {
       // The server assigns each video track the label "video_N" (where N is the
-      // display id) via CreateVideoTrack in peer_connection.cpp. On client
-      // side, Parsing it here from MediaStreamTrack.id gives us the correct display
-      // id even when displays are added or removed dynamically.
+      // display id) when adding video transceiver. On client side, parsing it
+      // here from MediaStreamTrack.id gives us the correct display id.
       let displayId;
       const m = event.track.id.match(/^video_(\d+)$/);
       if (m) {
         displayId = parseInt(m[1], 10);
       } else {
-        console.error(
-          `failed to paser display id: ${event.track.id}`,
-        );
+        console.error(`failed to paser display id: ${event.track.id}`);
         return;
       }
 
@@ -3526,12 +3768,16 @@ class AnboxWebRTCManager {
       this._videoStreams[displayId] = singleTrackStream;
 
       if (displayId === 0) {
-        // Primary display (legacy single display)
         this._videoStream = singleTrackStream;
-        if (event.streams[0]) event.streams[0].onremovetrack = this._onClose;
+        // Close the session when the primary display track ends while
+        // for any other displays, just notify the consumer to detach only
+        // this display when its track ends.
+        event.track.onended = this._onClose;
       } else {
-        // External displays and notify AnboxStream to wire a new video element
+        // Notify AnboxStream to attach the new video track to a video container.
         this._onExtraVideoTrack(displayId, singleTrackStream);
+        event.track.onended = () =>
+          this._options.callbacks.videoTrackRemoved(displayId);
       }
     } else if (kind === "audio") {
       this._audioStream = event.streams[0];
@@ -3540,7 +3786,7 @@ class AnboxWebRTCManager {
 
     const audioOnly = !this._stream.video && this._stream.audio;
     const videoOnly = this._stream.video && !this._stream.audio;
-    // Prevent streaming until regardind tracks are available
+    // Do not fire ready callback until regarding tracks are available.
     if (
       (audioOnly && this._audioStream) ||
       (videoOnly && this._videoStream) ||
