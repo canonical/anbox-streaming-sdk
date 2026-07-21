@@ -3769,12 +3769,16 @@ class AnboxWebRTCManager {
       // The server assigns each video track the label "video_N" (where N is the
       // display id) when adding video transceiver. On client side, parsing it
       // here from MediaStreamTrack.id gives us the correct display id.
+      // NOTE: older images use the legacy track name "video", hence treat
+      // those as primary display for backward compatibility.
       let displayId;
       const m = event.track.id.match(/^video_(\d+)$/);
       if (m) {
         displayId = parseInt(m[1], 10);
+      } else if (event.track.id === "video") {
+        displayId = 0;
       } else {
-        console.error(`failed to paser display id: ${event.track.id}`);
+        console.error(`failed to parse display id: ${event.track.id}`);
         return;
       }
 
