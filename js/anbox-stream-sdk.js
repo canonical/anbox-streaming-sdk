@@ -436,6 +436,7 @@ class AnboxStream {
         if (video.videoWidth > 0 && video.videoHeight > 0) computeDims();
       });
       ro.observe(container);
+      this._displayStates[displayId].resizeObserver = ro;
     }
 
     if (displayId !== 0) {
@@ -1262,6 +1263,14 @@ class AnboxStream {
     const audio = document.getElementById(this._audioID);
     if (video) video.remove();
     if (audio) audio.remove();
+
+    // Disconnect ResizeObservers to avoid stale callbacks after teardown.
+    for (const state of Object.values(this._displayStates)) {
+      if (state.resizeObserver) {
+        state.resizeObserver.disconnect();
+        state.resizeObserver = null;
+      }
+    }
 
     const initialContainerID = this._options.targetElement || null;
     this._containerIDs = initialContainerID ? { 0: initialContainerID } : {};
