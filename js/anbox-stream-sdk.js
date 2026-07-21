@@ -159,12 +159,10 @@ class AnboxStream {
 
     this._id = Math.random().toString(36).substr(2, 9);
 
-    // _containerID is the primary display container. It's reserved for
-    // in single display.
-    this._containerID = options.targetElement || null;
-    // _containerIDs is an array of video container IDs used to attach input listeners
-    // to multiple video tracks.
-    this._containerIDs = this._containerID ? {0: this._containerID} : {};
+    // _containerIDs maps display id to the DOM container id for that display.
+    this._containerIDs = this._options.targetElement
+      ? { 0: this._options.targetElement }
+      : {};
 
     this._videoID = "anbox-stream-video-" + this._id;
     this._audioID = "anbox-stream-audio-" + this._id;
@@ -174,7 +172,7 @@ class AnboxStream {
     this._pendingVideoTracks = {};
     this._pendingReadyCount = 0;
 
-    this._displayStates = this._containerID
+    this._displayStates = this._options.targetElement
       ? {
           0: {
             dimensions: null,
@@ -198,7 +196,7 @@ class AnboxStream {
       dataChannels: this._options.dataChannels,
       foregroundActivity: this._options.foregroundActivity,
       stats: {
-        overlayID: this._containerID,
+        overlayID: this._options.targetElement || null,
         enable: this._options.enableStats,
       },
       debug: this._options.experimental.debug,
@@ -276,38 +274,6 @@ class AnboxStream {
 
     this._originalOrientation = null;
     this._currentRotationDegrees = 0;
-    // Legacy aliases forward to primary display state for any code that was not
-    // yet updated to use the per-display state bag.
-    Object.defineProperty(this, "_dimensions", {
-      get: () => this._displayStates[0].dimensions,
-      set: (v) => {
-        this._displayStates[0].dimensions = v;
-      },
-    });
-    Object.defineProperty(this, "_primaryTouchId", {
-      get: () => this._displayStates[0].primaryTouchId,
-      set: (v) => {
-        this._displayStates[0].primaryTouchId = v;
-      },
-    });
-    Object.defineProperty(this, "_pointersOutofBounds", {
-      get: () => this._displayStates[0].pointersOutofBounds,
-      set: (v) => {
-        this._displayStates[0].pointersOutofBounds = v;
-      },
-    });
-    Object.defineProperty(this, "_activeTouchPointers", {
-      get: () => this._displayStates[0].activeTouchPointers,
-      set: (v) => {
-        this._displayStates[0].activeTouchPointers = v;
-      },
-    });
-    Object.defineProperty(this, "_pointerIdsMapper", {
-      get: () => this._displayStates[0].pointerIdsMapper,
-      set: (v) => {
-        this._displayStates[0].pointerIdsMapper = v;
-      },
-    });
 
     this._displayEventListeners = [];
 
@@ -465,7 +431,7 @@ class AnboxStream {
     // https://bugs.chromium.org/p/chromium/issues/detail?id=462164
     // To work around it we put the outer container in fullscreen and scale the video
     // to fit it. When exiting fullscreen we undo style changes done to the video element
-    const videoContainer = document.getElementById(this._containerID);
+    const videoContainer = document.getElementById(this._containerIDs[0]);
     if (videoContainer.requestFullscreen) {
       videoContainer.requestFullscreen().catch((err) => {
         console.log(
@@ -933,7 +899,7 @@ class AnboxStream {
     // In fully dynamic mode (no targetElement) the video element is not
     // created here. The WebRTC source is stored in _pendingVideoTracks[0]
     // by _webrtcReady() and injected into the DOM by attachDisplay(0).
-    if (!this._containerID) {
+    if (!this._options.targetElement) {
       if (this._options.stream.audio && this._options.devices.speaker) {
         const audio = document.createElement("audio");
         audio.id = this._audioID;
@@ -951,7 +917,7 @@ class AnboxStream {
       return;
     }
 
-    let mediaContainer = document.getElementById(this._containerID);
+    let mediaContainer = document.getElementById(this._options.targetElement);
     // We set the container as relative so the video element is absolute to it and not something else
     mediaContainer.style.position = "relative";
     // Disable native controls for touch events (zooming, panning)
@@ -1769,8 +1735,8 @@ class AnboxStream {
     )
       return;
 
-    const state = this._displayStates[displayId];
-    if (!state) return;
+    const displayState = this._displayStates[displayId];
+    if (!displayState) return;
 
     // The pointerEvent.pointerId increments every time when a new touch point
     // is pressed(can be used to differentiate the touch point from others,
@@ -1781,11 +1747,11 @@ class AnboxStream {
     // correct MT slot event forwarding to Android container.
     const pointerId = Math.abs(pointerEvent.pointerId);
     if (pointerEvent.isPrimary) {
-      state.primaryTouchId = pointerId;
+      displayState.primaryTouchId = pointerId;
     }
 
-    const ori_pointerId = pointerId - state.primaryTouchId;
-    const new_pointerId = this._findPointerId(ori_pointerId, state);
+    const ori_pointerId = pointerId - displayState.primaryTouchId;
+    const new_pointerId = this._findPointerId(ori_pointerId, displayState);
 
     // JS events are read-only, so we create a clone of the event that
     // we can modify down the road
@@ -1814,7 +1780,7 @@ class AnboxStream {
       if (!this._options.experimental.emulatePointerEvent) return;
 
       if (
-        event.pointerId in state.pointersOutofBounds &&
+        event.pointerId in displayState.pointersOutofBounds &&
         event.type != "pointerup"
       )
         return;
@@ -1823,7 +1789,7 @@ class AnboxStream {
       // is out of bounds.
       event.type = "pointerup";
 
-      const dim = state.dimensions;
+      const dim = displayState.dimensions;
       if (event.clientX < 0) {
         event.clientX = 0;
       } else if (event.clientX > dim.playerWidth) {
@@ -1835,10 +1801,10 @@ class AnboxStream {
         event.clientY = dim.playerHeight;
       }
 
-      state.pointersOutofBounds[event.pointerId] = true;
+      displayState.pointersOutofBounds[event.pointerId] = true;
     } else if (
       this._options.experimental.emulatePointerEvent &&
-      event.pointerId in state.pointersOutofBounds
+      event.pointerId in displayState.pointersOutofBounds
     ) {
       // Replace the type of the event with 'pointerdown' if it comes
       // to 'pointermove' event after the event with the type 'pointerup'
@@ -1851,14 +1817,14 @@ class AnboxStream {
         event.type = "pointerdown";
       }
 
-      delete state.pointersOutofBounds[event.pointerId];
+      delete displayState.pointersOutofBounds[event.pointerId];
     }
 
     // Apply video scaling and rotation to the coordinates
     this._translateLocalCoordsToRemoteCoords(event, displayId);
 
     if (event.type === "pointermove" && event.pointerType === "touch") {
-      const index = state.activeTouchPointers.indexOf(event.pointerId);
+      const index = displayState.activeTouchPointers.indexOf(event.pointerId);
       if (index === -1) return;
       this._sendInputEvent("touch-move", {
         id: event.pointerId,
@@ -1878,8 +1844,8 @@ class AnboxStream {
       }
       this._sendInputEvent("mouse-move", e);
     } else if (event.type === "pointerdown" && event.pointerType === "touch") {
-      const index = state.activeTouchPointers.indexOf(event.pointerId);
-      if (index === -1) state.activeTouchPointers.push(event.pointerId);
+      const index = displayState.activeTouchPointers.indexOf(event.pointerId);
+      if (index === -1) displayState.activeTouchPointers.push(event.pointerId);
       this._sendInputEvent("touch-start", {
         id: event.pointerId,
         x: event.clientX,
@@ -1898,8 +1864,8 @@ class AnboxStream {
       (event.type === "pointerup" || event.type === "pointercancel") &&
       event.pointerType === "touch"
     ) {
-      const index = state.activeTouchPointers.indexOf(event.pointerId);
-      if (index > -1) state.activeTouchPointers.splice(index, 1);
+      const index = displayState.activeTouchPointers.indexOf(event.pointerId);
+      if (index > -1) displayState.activeTouchPointers.splice(index, 1);
 
       // Fire the `touch-end` event for each touch points to avoid phantom
       // touch pointer but only includes the `BTN_TOUCH=0` message which is
@@ -1910,11 +1876,11 @@ class AnboxStream {
       // Android frameworks, which is incorrect.
       this._sendInputEvent("touch-end", {
         id: event.pointerId,
-        last: state.activeTouchPointers.length === 0,
+        last: displayState.activeTouchPointers.length === 0,
         display_id: displayId,
       });
 
-      delete state.pointerIdsMapper[ori_pointerId];
+      delete displayState.pointerIdsMapper[ori_pointerId];
     } else if (
       (event.type === "pointerup" || event.type === "pointercancel") &&
       event.pointerType === "mouse"
@@ -1929,13 +1895,15 @@ class AnboxStream {
     }
   }
 
-  _findPointerId(pointerId, state) {
+  _findPointerId(pointerId, displayState) {
     // AOSP supports max 10 touch points and we use the pointerId as the ABS_MT_SLOT
     // and ABS_MT_TRACKING_ID passing down to the container. However the pointerEvent.pointerId
     // would be increased all the time when lifting one finger up and down in a short
     // amount period of time when it comes to multiple touch scenario. Hence we need
     // to find out the minimal available pointerId to avoid the it exceeded the max value.
-    const mapper = state ? state.pointerIdsMapper : this._pointerIdsMapper;
+    const mapper = displayState
+      ? displayState.pointerIdsMapper
+      : this._displayStates[0].pointerIdsMapper;
     if (Object.keys(mapper).length > 0) {
       if (!(pointerId in mapper)) {
         let existing_pointerIds = [];
@@ -2063,8 +2031,10 @@ class AnboxStream {
    * @return coordinates.y {Number} updated Y coordinate
    * @private
    */
-  _convertTouchInput(x, y) {
-    const dim = this._dimensions;
+  _convertTouchInput(x, y, displayId = 0) {
+    const dim = this._displayStates[displayId]
+      ? this._displayStates[displayId].dimensions
+      : this._displayStates[0].dimensions;
     if (!dim) {
       throw newError("sdk is not ready yet", ANBOX_STREAM_SDK_ERROR_INTERNAL);
     }
@@ -2113,7 +2083,7 @@ class AnboxStream {
   }
 
   _setVideoContainerFocused(enabled) {
-    const videoContainer = document.getElementById(this._containerID);
+    const videoContainer = document.getElementById(this._containerIDs[0]);
     videoContainer.contentEditable = enabled;
     if (videoContainer.contentEditable) videoContainer.focus();
     else videoContainer.blur();
