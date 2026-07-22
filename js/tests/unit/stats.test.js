@@ -373,3 +373,53 @@ test("stats overlay is properly displayed", () => {
   expect(overlay.innerHTML).toContain("totalBytesReceived: 1.00 MB");
   expect(overlay.innerHTML).toContain("bandWidth: 8.00 Mbit/s");
 });
+
+test("per-display video stats are tracked separately for multi video track sessions", () => {
+  const mgr = new AnboxStream(sdkOptions);
+
+  const timestamp = performance.now();
+  const data = [
+    {
+      timestamp,
+      type: "inbound-rtp",
+      kind: "video",
+      trackIdentifier: "video_0",
+      framesPerSecond: 30,
+      packetsReceived: 10,
+      bytesReceived: 1000,
+    },
+    {
+      timestamp,
+      type: "inbound-rtp",
+      kind: "video",
+      trackIdentifier: "video_1",
+      framesPerSecond: 60,
+      packetsReceived: 20,
+      bytesReceived: 2000,
+    },
+    {
+      timestamp,
+      type: "inbound-rtp",
+      kind: "video",
+      trackIdentifier: "video_2",
+      framesPerSecond: 15,
+      packetsReceived: 5,
+      bytesReceived: 500,
+    },
+  ];
+
+  mgr._webrtcManager._processRawStats(data);
+  const stats = mgr._webrtcManager.getStats();
+
+  // The legacy `video` field keeps reporting primary display and
+  // stays in sync with `videoTracks[0]` for backward compatibility.
+  expect(stats.video.fps).toEqual(30);
+  expect(stats.video.packetsReceived).toEqual(10);
+  expect(stats.video).toBe(stats.videoTracks[0]);
+
+  // Each additional display gets its own independent stats entry.
+  expect(stats.videoTracks[1].fps).toEqual(60);
+  expect(stats.videoTracks[1].packetsReceived).toEqual(20);
+  expect(stats.videoTracks[2].fps).toEqual(15);
+  expect(stats.videoTracks[2].packetsReceived).toEqual(5);
+});
