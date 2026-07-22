@@ -4338,38 +4338,37 @@ class AnboxWebRTCManager {
     insertStat("localCandidateType", this._stats.network.localCandidateType);
     insertStat("remoteCandidateType", this._stats.network.remoteCandidateType);
 
-    insertHeader("Video");
-    insertStat("codec", this._stats.video.codec);
-    insertStat("bandWidth", mbits_format(this._stats.video.bandwidthMbit));
-    insertStat(
-      "totalBytesReceived",
-      mb_format(this._stats.video.totalBytesReceived),
-    );
-    insertStat("fps", this._stats.video.fps);
-    insertStat("decodeTime", ms_format(this._stats.video.decodeTime));
-    insertStat("jitter", ms_format(this._stats.video.jitter));
-    insertStat(
-      "avgJitterBufferDelay",
-      ms_format(this._stats.video.avgJitterBufferDelay),
-    );
-    insertStat("packetsReceived", this._stats.video.packetsReceived);
-    insertStat("packetsLost", this._stats.video.packetsLost);
-    insertStat("framesDropped", this._stats.video.framesDropped);
-    insertStat("framesDecoded", this._stats.video.framesDecoded);
-    insertStat("framesReceived", this._stats.video.framesReceived);
-    insertStat("keyFramesDecoded", this._stats.video.keyFramesDecoded);
-    insertStat(
-      "totalAssemblyTime",
-      s_format(this._stats.video.totalAssemblyTime),
-    );
-    insertStat(
-      "framesAssembledFromMultiplePackets",
-      this._stats.video.framesAssembledFromMultiplePackets,
-    );
-    insertStat("pliCount", this._stats.video.pliCount);
-    insertStat("firCount", this._stats.video.firCount);
-    insertStat("nackCount", this._stats.video.nackCount);
-    insertStat("qpSum", this._stats.video.qpSum);
+    // One section per received video track, sorted by display id
+    // so the primary display always comes first.
+    const displayIds = Object.keys(this._stats.videoTracks)
+      .map(Number)
+      .sort((a, b) => a - b);
+    for (const displayId of displayIds) {
+      const v = this._stats.videoTracks[displayId];
+      insertHeader(`Video (display ${displayId})`);
+      insertStat("codec", v.codec);
+      insertStat("bandWidth", mbits_format(v.bandwidthMbit));
+      insertStat("totalBytesReceived", mb_format(v.totalBytesReceived));
+      insertStat("fps", v.fps);
+      insertStat("decodeTime", ms_format(v.decodeTime));
+      insertStat("jitter", ms_format(v.jitter));
+      insertStat("avgJitterBufferDelay", ms_format(v.avgJitterBufferDelay));
+      insertStat("packetsReceived", v.packetsReceived);
+      insertStat("packetsLost", v.packetsLost);
+      insertStat("framesDropped", v.framesDropped);
+      insertStat("framesDecoded", v.framesDecoded);
+      insertStat("framesReceived", v.framesReceived);
+      insertStat("keyFramesDecoded", v.keyFramesDecoded);
+      insertStat("totalAssemblyTime", s_format(v.totalAssemblyTime));
+      insertStat(
+        "framesAssembledFromMultiplePackets",
+        v.framesAssembledFromMultiplePackets,
+      );
+      insertStat("pliCount", v.pliCount);
+      insertStat("firCount", v.firCount);
+      insertStat("nackCount", v.nackCount);
+      insertStat("qpSum", v.qpSum);
+    }
 
     insertHeader("Audio Output");
     insertStat("codec", this._stats.audioOutput.codec);
@@ -4716,7 +4715,7 @@ class AnboxStreamCanvas {
     // Disable the ESLint rule for better readability
     /* eslint-disable */
     const vertices = [
-      // postion   // texture coordinate
+      // position  // texture coordinate
       -1.0, 1.0,   0.0, 1.0,
       -1.0, -1.0,  0.0, 0.0,
       1.0,  -1.0,  1.0, 0.0,
