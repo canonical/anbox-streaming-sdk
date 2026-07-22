@@ -2909,7 +2909,7 @@ class AnboxWebRTCManager {
     this._audioStream = null;
     this._audioInputStream = null;
     this._videoInputStream = null;
-    this._video_codec_id = null;
+    this._video_codec_ids = {};
     this._audioOutput_codec_id = null;
     this._audioInput_codec_id = null;
     // All video streams keyed by display id
@@ -2961,27 +2961,6 @@ class AnboxWebRTCManager {
         localCandidateType: "",
         remoteCandidateType: "",
       },
-      video: {
-        bandwidthMbit: 0,
-        totalBytesReceived: 0,
-        fps: 0,
-        decodeTime: 0,
-        jitter: 0,
-        avgJitterBufferDelay: 0,
-        packetsReceived: 0,
-        packetsLost: 0,
-        framesDropped: 0,
-        framesDecoded: 0,
-        framesReceived: 0,
-        keyFramesDecoded: 0,
-        totalAssemblyTime: 0,
-        pliCount: 0,
-        firCount: 0,
-        nackCount: 0,
-        qpSum: 0,
-        framesAssembledFromMultiplePackets: 0,
-        codec: "",
-      },
       audioOutput: {
         bandwidthMbit: 0,
         totalBytesReceived: 0,
@@ -3003,9 +2982,13 @@ class AnboxWebRTCManager {
         },
       },
     };
+    // `video` is an alias of `videoTracks[0]` kept for the backward compatibility, while
+    // new multi-display consumers can look up any track through `videoTracks[displayId]`.
+    this._stats.video = this._initVideoTrackStats();
+    this._stats.videoTracks = { 0: this._stats.video };
 
     this._lastReport = {
-      video: {},
+      videoTracks: {},
       audioOutput: {},
       audioInput: {},
       canvas: {},
@@ -3291,7 +3274,10 @@ class AnboxWebRTCManager {
   }
 
   /**
-   * video: Statistics on the received video track.
+   * video: Statistics on the received video track of display 0 (the primary
+   *   display). This field is kept for backward compatibility and is always
+   *   equal to `videoTracks[0]`. New code that needs per-display statistics
+   *   (multi video track sessions) should use `videoTracks` instead.
    *   bandwidthMbit: Video traffic received in mbits/s.
    *   totalBytesReceived: Total cumulated bytes received for the current session.
    *   fps: Current frames per second.
@@ -3300,6 +3286,9 @@ class AnboxWebRTCManager {
    *   avgJitterBufferDelay: Average variance in packet delay in seconds. A high jitter can mean an unstable or congested network.
    *   packetsReceived: Total number of packets received.
    *   packetsLost: Total number of packets lost.
+   * videoTracks: Statistics on every received video track, keyed by display id
+   *   (0 for the primary display, 1+ for additional displays in multi video
+   *   track sessions). Each entry has the same struct as `video` above.
    * network: Information about the network and WebRTC connections.
    *   currentRtt: Current round trip time in seconds.
    *   networkType: Type of network in use. (NOTE: It's deprecated to preserve the privacy) Can be one of the following:
@@ -3843,22 +3832,7 @@ class AnboxWebRTCManager {
   _onRtcTrack(event) {
     const kind = event.track.kind;
     if (kind === "video") {
-      // The server assigns each video track the label "video_N" (where N is the
-      // display id) when adding video transceiver. On client side, parsing it
-      // here from MediaStreamTrack.id gives us the correct display id.
-      // NOTE: older images use the legacy track name "video", hence treat
-      // those as primary display for backward compatibility.
-      let displayId;
-      const m = event.track.id.match(/^video_(\d+)$/);
-      if (m) {
-        displayId = parseInt(m[1], 10);
-      } else if (event.track.id === "video") {
-        displayId = 0;
-      } else {
-        console.error(`failed to parse display id: ${event.track.id}`);
-        return;
-      }
-
+      const displayId = this._displayIdFromTrackId(event.track.id);
       // Wrap the single track in its own MediaStream. All video tracks share
       // the same stream_id on the server side so event.streams[0] is the same
       // MediaStream object for every track. A per-track MediaStream guarantees
@@ -4112,6 +4086,43 @@ class AnboxWebRTCManager {
     this._audioInputStream = stream;
   }
 
+  _initVideoTrackStats() {
+    return {
+      bandwidthMbit: 0,
+      totalBytesReceived: 0,
+      fps: 0,
+      decodeTime: 0,
+      jitter: 0,
+      avgJitterBufferDelay: 0,
+      packetsReceived: 0,
+      packetsLost: 0,
+      framesDropped: 0,
+      framesDecoded: 0,
+      framesReceived: 0,
+      keyFramesDecoded: 0,
+      totalAssemblyTime: 0,
+      pliCount: 0,
+      firCount: 0,
+      nackCount: 0,
+      qpSum: 0,
+      framesAssembledFromMultiplePackets: 0,
+      codec: "",
+    };
+  }
+
+  // The server assigns each video track the label "video_N" (where N is the
+  // display id) when adding video transceiver. On client side, parsing it
+  // here from MediaStreamTrack.id gives us the correct display id.
+  // NOTE: older images use the legacy track name "video", hence treat
+  // those as primary display for backward compatibility.
+  _displayIdFromTrackId(trackId) {
+    if (typeof trackId === "string") {
+      const m = trackId.match(/^video_(\d+)$/);
+      if (m) return parseInt(m[1], 10);
+    }
+    return 0;
+  }
+
   _startStatsUpdater() {
     let pcConf = this._pc.getConfiguration();
     if (pcConf) {
@@ -4156,7 +4167,10 @@ class AnboxWebRTCManager {
         report.type === "inbound-rtp" &&
         (report.kind === "video" || report.mediaType === "video")
       ) {
-        let v = this._stats.video;
+        const displayId = this._displayIdFromTrackId(report.trackIdentifier);
+        if (!(displayId in this._stats.videoTracks))
+          this._stats.videoTracks[displayId] = this._initVideoTrackStats();
+        let v = this._stats.videoTracks[displayId];
         v.fps = report.framesPerSecond;
         v.packetsLost = report.packetsLost;
         v.packetsReceived = report.packetsReceived;
@@ -4175,17 +4189,18 @@ class AnboxWebRTCManager {
         v.avgJitterBufferDelay =
           report.jitterBufferDelay / report.jitterBufferEmittedCount;
         v.totalBytesReceived = report.bytesReceived;
-        this._video_codec_id = report.codecId;
+        this._video_codec_ids[displayId] = report.codecId;
+        const lastReport = this._lastReport.videoTracks[displayId];
         const elapsedInSec = Math.round(
           (report.timestamp -
-            (this._lastReport.video?.timestamp || report.timestamp - 1000)) /
+            (lastReport?.timestamp || report.timestamp - 1000)) /
             1000.0,
         );
         v.bandwidthMbit = bytes_to_mbits(
-          report.bytesReceived - (this._lastReport.video?.bytesReceived || 0),
+          report.bytesReceived - (lastReport?.bytesReceived || 0),
           elapsedInSec,
         );
-        this._lastReport.video = report;
+        this._lastReport.videoTracks[displayId] = report;
         if (report.framesDecoded !== 0)
           v.decodeTime = report.totalDecodeTime / report.framesDecoded;
       } else if (
@@ -4259,8 +4274,12 @@ class AnboxWebRTCManager {
         const media_info = report.mimeType.split("/");
         if (media_info.length < 2) return;
         const [media_type, media_codec] = media_info;
-        if (report.id == this._video_codec_id && media_type == "video")
-          this._stats.video.codec = media_codec;
+        if (media_type == "video") {
+          for (const displayId of Object.keys(this._video_codec_ids)) {
+            if (report.id == this._video_codec_ids[displayId])
+              this._stats.videoTracks[displayId].codec = media_codec;
+          }
+        }
         if (report.id == this._audioOutput_codec_id && media_type == "audio")
           this._stats.audioOutput.codec = media_codec;
         if (report.id == this._audioInput_codec_id && media_type == "audio")
