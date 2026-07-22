@@ -284,8 +284,8 @@ class AnboxStream {
     this._gamepadManager = null;
     this._streamCanvas = null;
 
-    this._originalOrientation = null;
-    this._currentRotationDegrees = 0;
+    this._originalOrientationByDisplay = {};
+    this._rotationDegreesByDisplay = {};
 
     this._displayEventListeners = [];
 
@@ -1285,6 +1285,9 @@ class AnboxStream {
           },
         }
       : {};
+
+    this._originalOrientationByDisplay = {};
+    this._rotationDegreesByDisplay = {};
   }
 
   _stopStreaming() {
@@ -1482,29 +1485,42 @@ class AnboxStream {
   }
 
   /**
-   * Rotates the video element to a specific orientation or absolute degree.
+   * Rotates a display's video element to a specific orientation or absolute degree.
    * @param {number|string} orientation - The target orientation as an absolute degree (multiple of 90), or one of:
    *   'portrait', 'landscape', 'reverse-portrait', 'reverse-landscape'.
+   * @param {number} [displayId=0] - Index of the display to rotate. Each attached display
+   *   (see `attachDisplay`) can be rotated independently.
    *
-   * If a string is provided, the SDK maps it to degrees based on `this._originalOrientation`:
-   *   - when originalOrientation is 'portrait': portrait=0, landscape=90, reverse-portrait=180, reverse-landscape=270
-   *   - when originalOrientation is 'landscape': landscape=0, reverse-portrait=90, reverse-landscape=180, portrait=270
+   * If a string is provided, the SDK maps it to degrees based on the given display's original
+   * orientation:
+   *   - when the display's original orientation is 'portrait': portrait=0, landscape=90, reverse-portrait=180, reverse-landscape=270
+   *   - when the display's original orientation is 'landscape': landscape=0, reverse-portrait=90, reverse-landscape=180, portrait=270
    *
    * @note
    * 1. This value represents absolute degrees relative to the initial video orientation
-   * established when the session is first created regardless of whether the Android
-   * container is in portrait or landscape mode at startup, the initial degrees is always
-   * defined as 0. Since this is an absolute coordinate system, it is the
+   * established when the display's session is first created regardless of whether the
+   * Android container is in portrait or landscape mode at startup, the initial degrees is
+   * always defined as 0. Since this is an absolute coordinate system, it is the
    * caller's responsibility to provide the final target angle rather than a relative degree
    * from the current rotation.
    * 2. If the 'enableAccelerometer' option is enabled in the SDK configuration,
    * real-time sensor data from the client device will conflict with this function,
    * causing the rotation to be overridden or fail. Ensure manual rotation and
    * automatic accelerometer streaming are not used simultaneously.
+   * 3. Rotating any display sends a global accelerometer sensor event to the Android instance
+   * And sensor data is device-wide. This is independent from the local CSS rotation applied to
+   * the given displayId's video element. The touch input coordinates for each display are always
+   * remapped locally based on that display's own rotation state, so this is unaffected by which
+   * display the sensor event ends up applying to.
    * @returns {boolean} Returns true if the video element is rotated successfully, otherwise returns false.
    */
-  rotate(orientation) {
+  rotate(orientation, displayId = 0) {
     let degrees;
+
+    if (!(displayId in this._displayStates)) {
+      console.error(`Invalid display id given: ${displayId}`);
+      return false;
+    }
 
     if (typeof orientation === "string") {
       const orientationStrings = [
@@ -1519,15 +1535,16 @@ class AnboxStream {
         return false;
       }
 
+      const originalOrientation = this._originalOrientationByDisplay[displayId];
       let orientationToDegreesMap;
-      if (this._originalOrientation === "portrait") {
+      if (originalOrientation === "portrait") {
         orientationToDegreesMap = {
           portrait: 0,
           landscape: 90,
           "reverse-portrait": 180,
           "reverse-landscape": 270,
         };
-      } else if (this._originalOrientation === "landscape") {
+      } else if (originalOrientation === "landscape") {
         orientationToDegreesMap = {
           landscape: 0,
           "reverse-portrait": 90,
@@ -1535,9 +1552,7 @@ class AnboxStream {
           portrait: 270,
         };
       } else {
-        console.error(
-          `Invalid original orientation: ${this._originalOrientation}`,
-        );
+        console.error(`Invalid original orientation: ${originalOrientation}`);
         return false;
       }
 
@@ -1568,12 +1583,25 @@ class AnboxStream {
       return false;
     }
 
+    const videoId =
+      displayId === 0 ? this._videoID : `${this._videoID}-display-${displayId}`;
+    let visualElement;
+    if (displayId === 0 && this._options.experimental.upscaling.enabled) {
+      visualElement = document.getElementById(this._canvasID);
+    } else {
+      visualElement = document.getElementById(videoId);
+    }
+    if (!visualElement) {
+      console.error(`Cannot rotate: display ${displayId} is not attached.`);
+      return false;
+    }
+
     const normalized = ((degrees % 360) + 360) % 360;
-    this._currentRotationDegrees = normalized;
+    this._rotationDegreesByDisplay[displayId] = normalized;
 
     let accelData;
     const g = 9.81;
-    switch (this._currentRotationDegrees) {
+    switch (normalized) {
       case 90:
         accelData = { x: -g, y: 0, z: 0 };
         break;
@@ -1594,20 +1622,14 @@ class AnboxStream {
     };
     this._webrtcManager.sendControlMessage("sensor:event", data);
 
-    let visualElement;
-    if (this._options.experimental.upscaling.enabled) {
-      visualElement = document.getElementById(this._canvasID);
-    } else {
-      visualElement = document.getElementById(this._videoID);
-    }
-    visualElement.style.transform = `rotate(${this._currentRotationDegrees}deg)`;
+    visualElement.style.transform = `rotate(${normalized}deg)`;
     this._onResize();
 
     return true;
   }
 
-  getCurrentRotation() {
-    return this._currentRotationDegrees;
+  getCurrentRotation(displayId = 0) {
+    return this._rotationDegreesByDisplay[displayId] || 0;
   }
 
   _onResize() {
@@ -1655,7 +1677,8 @@ class AnboxStream {
       container.clientWidth - getPadding("left") - getPadding("right");
 
     // Handle rotation
-    switch (this._currentRotationDegrees) {
+    const rotationDegrees = this.getCurrentRotation(0);
+    switch (rotationDegrees) {
       case 0:
       case 180:
         break;
@@ -1688,7 +1711,7 @@ class AnboxStream {
     }
 
     let offsetTop;
-    switch (this._currentRotationDegrees) {
+    switch (rotationDegrees) {
       case 0:
       case 180:
         visualElement.style.height = playerHeight.toString() + "px";
@@ -1735,9 +1758,9 @@ class AnboxStream {
     }
 
     // Initialize basic orientation
-    if (this._originalOrientation === null) {
-      if (playerWidth > playerHeight) this._originalOrientation = "landscape";
-      else this._originalOrientation = "portrait";
+    if (this._originalOrientationByDisplay[0] === undefined) {
+      this._originalOrientationByDisplay[0] =
+        playerWidth > playerHeight ? "landscape" : "portrait";
     }
 
     // The visual offset is always derived from the same formula, no matter the orientation.
@@ -1754,28 +1777,46 @@ class AnboxStream {
     };
   }
 
-  // Compute dimensions for a single display's video element inside its container
+  // Compute dimensions for a display's video element inside its container
   // for multi-display mode.
   _computeMultiDisplayDimensions(video, container, displayId) {
     const cRect = container.getBoundingClientRect();
     const cellWidth = cRect.width;
     const cellHeight = cRect.height;
 
-    const videoWidth = video.videoWidth;
-    const videoHeight = video.videoHeight;
+    // When a display is rotated by 90 or 270 degrees, its on-screen aspect
+    // ratio is swapped compared to the native video, so the fit/scale
+    // computation below has to be based on the swapped dimensions.
+    const rotationDegrees = this.getCurrentRotation(displayId);
+    const isRotated = rotationDegrees === 90 || rotationDegrees === 270;
+    const videoWidth = isRotated ? video.videoHeight : video.videoWidth;
+    const videoHeight = isRotated ? video.videoWidth : video.videoHeight;
 
-    // Compute the largest size that fits the video aspect ratio inside the cell.
+    // Compute the largest size that fits the (possibly rotated) video aspect
+    // ratio inside the cell.
     const scale = Math.min(cellWidth / videoWidth, cellHeight / videoHeight);
     const renderedWidth = Math.round(videoWidth * scale);
     const renderedHeight = Math.round(videoHeight * scale);
-    const offsetLeft = Math.round((cellWidth - renderedWidth) / 2);
-    const offsetTop = Math.round((cellHeight - renderedHeight) / 2);
 
-    // Size and position the video element to exactly match the rendered content.
-    video.style.width = renderedWidth + "px";
-    video.style.height = renderedHeight + "px";
-    video.style.left = offsetLeft + "px";
-    video.style.top = offsetTop + "px";
+    if (isRotated) {
+      // Size the element with its un-rotated dimensions so that once the CSS
+      // `rotate()` transform is applied around its center, the resulting
+      // on-screen bounding box matches renderedWidth and renderedHeight.
+      const offsetLeft = Math.round((cellWidth - renderedHeight) / 2);
+      const offsetTop = Math.round((cellHeight - renderedWidth) / 2);
+      video.style.width = renderedHeight + "px";
+      video.style.height = renderedWidth + "px";
+      video.style.left = offsetLeft + "px";
+      video.style.top = offsetTop + "px";
+    } else {
+      const offsetLeft = Math.round((cellWidth - renderedWidth) / 2);
+      const offsetTop = Math.round((cellHeight - renderedHeight) / 2);
+      // Size and position the video element to exactly match the rendered content.
+      video.style.width = renderedWidth + "px";
+      video.style.height = renderedHeight + "px";
+      video.style.left = offsetLeft + "px";
+      video.style.top = offsetTop + "px";
+    }
 
     if (!(displayId in this._displayStates)) {
       this._displayStates[displayId] = {
@@ -1798,6 +1839,13 @@ class AnboxStream {
       playerOffsetLeft: 0,
       playerOffsetTop: 0,
     };
+
+    // Initialize this display's original orientation from its native video dimensions,
+    // so that string-based orientation values can be resolved for this display.
+    if (this._originalOrientationByDisplay[displayId] === undefined) {
+      this._originalOrientationByDisplay[displayId] =
+        video.videoWidth > video.videoHeight ? "landscape" : "portrait";
+    }
   }
 
   _triggerModifierEvent(event, key) {
@@ -1927,12 +1975,19 @@ class AnboxStream {
     const vRect = video.getBoundingClientRect();
     if (vRect.width === 0 || vRect.height === 0) return false;
 
+    // Swap width and height here too so scale/offset when a display is rotated
+    // 90/270 degrees to stay consistent with the rotated on-screen box.
+    const rotationDegrees = this.getCurrentRotation(displayId);
+    const isRotated = rotationDegrees === 90 || rotationDegrees === 270;
+    const videoWidth = isRotated ? video.videoHeight : video.videoWidth;
+    const videoHeight = isRotated ? video.videoWidth : video.videoHeight;
+
     const scale = Math.min(
-      vRect.width / video.videoWidth,
-      vRect.height / video.videoHeight,
+      vRect.width / videoWidth,
+      vRect.height / videoHeight,
     );
-    const renderedWidth = Math.round(video.videoWidth * scale);
-    const renderedHeight = Math.round(video.videoHeight * scale);
+    const renderedWidth = Math.round(videoWidth * scale);
+    const renderedHeight = Math.round(videoHeight * scale);
     const contentOffsetX = Math.round((vRect.width - renderedWidth) / 2);
     const contentOffsetY = Math.round((vRect.height - renderedHeight) / 2);
 
@@ -1951,8 +2006,8 @@ class AnboxStream {
     };
     if (!state.dimensions) {
       state.dimensions = {
-        videoWidth: video.videoWidth,
-        videoHeight: video.videoHeight,
+        videoWidth: videoWidth,
+        videoHeight: videoHeight,
         ...newValues,
       };
     } else {
@@ -2310,15 +2365,16 @@ class AnboxStream {
       throw newError("sdk is not ready yet", ANBOX_STREAM_SDK_ERROR_INTERNAL);
     }
 
-    if (this._currentRotationDegrees === 0) return { x: x, y: y };
+    const rotationDegrees = this.getCurrentRotation(displayId);
+    if (rotationDegrees === 0) return { x: x, y: y };
 
-    let radians = (Math.PI / 180) * this._currentRotationDegrees,
+    let radians = (Math.PI / 180) * rotationDegrees,
       cos = Math.cos(radians),
       sin = Math.sin(radians),
       nx = Math.round(cos * x + sin * y),
       ny = Math.round(cos * y - sin * x);
 
-    switch (this._currentRotationDegrees) {
+    switch (rotationDegrees) {
       case 90:
         ny += dim.playerWidth;
         break;

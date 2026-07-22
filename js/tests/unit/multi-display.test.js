@@ -539,3 +539,193 @@ describe("videoTrackAdded and videoTrackRemoved callbacks", () => {
     expect(added).toEqual([1, 2]);
   });
 });
+
+describe("rotation in multi-display mode", () => {
+  function setupRotatedDisplay0() {
+    const stream = makeStreamWithTarget("main-container");
+    stream._webrtcManager = {
+      _isControlChannelOpen: true,
+      sendControlMessage: jest.fn(),
+      stop: jest.fn(),
+    };
+
+    const video0 = document.createElement("video");
+    video0.id = stream._videoID;
+    video0.__defineGetter__("videoWidth", () => 500);
+    video0.__defineGetter__("videoHeight", () => 1000);
+    document.getElementById("main-container").appendChild(video0);
+    stream._onResize();
+
+    // Enter multi-display mode by attaching a second display.
+    const fakeStream = makeFakeStream();
+    stream._pendingVideoTracks[1] = fakeStream;
+    stream.attachDisplay(1, "cell-1");
+
+    // Display 0's container in legacy (targetElement) mode is main-container
+    // itself (800x600, per addContainer() defaults).
+    const cell0 = document.getElementById("main-container");
+
+    return { stream, video0, cell0 };
+  }
+
+  test("_computeMultiDisplayDimensions swaps the fit dimensions for display 0 when rotated", () => {
+    const { stream, video0, cell0 } = setupRotatedDisplay0();
+
+    expect(stream.rotate(90)).toEqual(true);
+
+    stream._computeMultiDisplayDimensions(video0, cell0, 0);
+    const dim = stream._displayStates[0].dimensions;
+
+    // Native video is 500x1000 (portrait); rotated 90deg it effectively
+    // becomes a 1000x500 (landscape) box, which fits the 800x600 cell as
+    // 800x400 to fit the original aspect ratio.
+    expect(dim.playerWidth).toEqual(800);
+    expect(dim.playerHeight).toEqual(400);
+
+    // The element itself must be sized with the pre-transform dimensions
+    // so that after rotate 90deg, the on-screen box matches player size.
+    expect(video0.style.width).toEqual("400px");
+    expect(video0.style.height).toEqual("800px");
+  });
+
+  test("touch coordinates for a rotated display 0 match single-display behaviour", () => {
+    const single = makeStreamWithTarget("main-container");
+    single._webrtcManager = {
+      _isControlChannelOpen: true,
+      sendControlMessage: jest.fn(() => true),
+      stop: jest.fn(),
+    };
+    const singleVideo = document.createElement("video");
+    singleVideo.id = single._videoID;
+    singleVideo.__defineGetter__("videoWidth", () => 500);
+    singleVideo.__defineGetter__("videoHeight", () => 1000);
+    document.getElementById("main-container").appendChild(singleVideo);
+    single._onResize();
+    expect(single.rotate(90)).toEqual(true);
+    single._registerInputHandlers(0, document.getElementById("main-container"));
+
+    document.getElementById("main-container").dispatchEvent(
+      new PointerEvent("pointerdown", {
+        pointerType: "touch",
+        clientX: 0,
+        clientY: 100,
+        isPrimary: true,
+        pointerId: 1,
+      }),
+    );
+    const singleCall = single._webrtcManager.sendControlMessage.mock.calls.find(
+      (c) => c[0] === "input::touch-start",
+    );
+    expect(singleCall).toBeDefined();
+
+    document.body.innerHTML = "";
+
+    // Multi-display case: a second display attached to test multi-display mode.
+    const {
+      stream: multi,
+      video0,
+      cell0,
+    } = (() => {
+      const containerEl = document.createElement("div");
+      containerEl.id = "main-container";
+      containerEl.__defineGetter__("clientWidth", () => 800);
+      containerEl.__defineGetter__("clientHeight", () => 600);
+      containerEl.getBoundingClientRect = () => ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 600,
+        right: 800,
+        bottom: 600,
+      });
+      document.body.appendChild(containerEl);
+
+      const cell1 = document.createElement("div");
+      cell1.id = "cell-1";
+      document.body.appendChild(cell1);
+
+      return setupRotatedDisplay0();
+    })();
+
+    expect(multi.rotate(90)).toEqual(true);
+    multi._registerInputHandlers(0, cell0);
+
+    // Simulate the actual on-screen bounding box after rotating 90deg.
+    video0.getBoundingClientRect = () => ({
+      left: 0,
+      top: 100,
+      width: 800,
+      height: 400,
+      right: 800,
+      bottom: 500,
+    });
+
+    cell0.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        pointerType: "touch",
+        clientX: 0,
+        clientY: 100,
+        isPrimary: true,
+        pointerId: 1,
+      }),
+    );
+    const multiCall = multi._webrtcManager.sendControlMessage.mock.calls.find(
+      (c) => c[0] === "input::touch-start",
+    );
+    expect(multiCall).toBeDefined();
+
+    // Both modes must map the exact same on-screen click to the exact same
+    // remote coordinates.
+    expect(multiCall[1].x).toBeCloseTo(singleCall[1].x, 0);
+    expect(multiCall[1].y).toBeCloseTo(singleCall[1].y, 0);
+  });
+
+  test("each attached display can be rotated independently", () => {
+    const stream = makeStreamWithTarget("main-container");
+    stream._webrtcManager = {
+      _isControlChannelOpen: true,
+      sendControlMessage: jest.fn(),
+      stop: jest.fn(),
+    };
+
+    const video0 = document.createElement("video");
+    video0.id = stream._videoID;
+    video0.__defineGetter__("videoWidth", () => 500);
+    video0.__defineGetter__("videoHeight", () => 1000);
+    document.getElementById("main-container").appendChild(video0);
+    stream._onResize();
+
+    stream._pendingVideoTracks[1] = makeFakeStream();
+    stream.attachDisplay(1, "cell-1");
+    const video1 = document.getElementById(`${stream._videoID}-display-1`);
+    video1.__defineGetter__("videoWidth", () => 400);
+    video1.__defineGetter__("videoHeight", () => 300);
+
+    // The display 0 must stay unrotated when rotating display 1 only;
+    expect(stream.rotate(90, 1)).toEqual(true);
+    expect(video1.style.transform).toEqual("rotate(90deg)");
+    expect(video0.style.transform).not.toEqual("rotate(90deg)");
+    expect(stream.getCurrentRotation(0)).toEqual(0);
+    expect(stream.getCurrentRotation(1)).toEqual(90);
+
+    // The display 1 must be unaffected when when rotating display 0 only;
+    expect(stream.rotate(180, 0)).toEqual(true);
+    expect(video0.style.transform).toEqual("rotate(180deg)");
+    expect(stream.getCurrentRotation(0)).toEqual(180);
+    expect(stream.getCurrentRotation(1)).toEqual(90);
+  });
+
+  test("rotate() fails for a display id that is not attached", () => {
+    const stream = makeStreamWithTarget("main-container");
+    stream._webrtcManager = {
+      _isControlChannelOpen: true,
+      sendControlMessage: jest.fn(),
+      stop: jest.fn(),
+    };
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(stream.rotate(90, 5)).toEqual(false);
+
+    errSpy.mockRestore();
+  });
+});
