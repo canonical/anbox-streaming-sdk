@@ -326,12 +326,12 @@ test("rotate supports legacy orientation strings", () => {
   stream._onResize();
 
   // null original orientation should not work for string-based rotations
-  stream._originalOrientation = null;
+  stream._originalOrientationByDisplay[0] = null;
   expect(stream.rotate("portrait")).toEqual(false);
   expect(errSpy).toHaveBeenCalledWith("Invalid original orientation: null");
 
   // portrait origin mapping
-  stream._originalOrientation = "portrait";
+  stream._originalOrientationByDisplay[0] = "portrait";
 
   expect(stream.rotate("landscape")).toEqual(true);
   expect(stream.getCurrentRotation()).toEqual(90);
@@ -382,7 +382,7 @@ test("rotate supports legacy orientation strings", () => {
   );
 
   // landscape origin mapping
-  stream._originalOrientation = "landscape";
+  stream._originalOrientationByDisplay[0] = "landscape";
 
   expect(stream.rotate("reverse-portrait")).toEqual(true);
   expect(stream.getCurrentRotation()).toEqual(90);
