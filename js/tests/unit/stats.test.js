@@ -374,6 +374,42 @@ test("stats overlay is properly displayed", () => {
   expect(overlay.innerHTML).toContain("bandWidth: 8.00 Mbit/s");
 });
 
+test("stats overlay shows a section per display in multi video track sessions", () => {
+  const mgr = new AnboxStream(sdkOptions);
+  const overlayContainer = document.createElement("div");
+  overlayContainer.id = "stat-overlay-multi";
+  document.body.appendChild(overlayContainer);
+
+  mgr._webrtcManager._statsOverlayID = overlayContainer.id;
+  mgr._webrtcManager.showStatsOverlay();
+  mgr._webrtcManager._processRawStats([
+    {
+      timestamp: 1234,
+      type: "inbound-rtp",
+      kind: "video",
+      trackIdentifier: "video_0",
+      framesPerSecond: 60,
+      bytesReceived: 1000000,
+      totalAssemblyTime: 0,
+    },
+    {
+      timestamp: 1234,
+      type: "inbound-rtp",
+      kind: "video",
+      trackIdentifier: "video_1",
+      framesPerSecond: 30,
+      bytesReceived: 500000,
+      totalAssemblyTime: 0,
+    },
+  ]);
+  mgr._webrtcManager._refreshStatsOverlay();
+  const overlay = document.getElementById(overlayContainer.id + "_child");
+  expect(overlay.innerHTML).toContain("Video (display 0)");
+  expect(overlay.innerHTML).toContain("Video (display 1)");
+  expect(overlay.innerHTML).toContain("fps: 60");
+  expect(overlay.innerHTML).toContain("fps: 30");
+});
+
 test("per-display video stats are tracked separately for multi video track sessions", () => {
   const mgr = new AnboxStream(sdkOptions);
 
