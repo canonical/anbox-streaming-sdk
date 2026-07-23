@@ -274,7 +274,7 @@ test("rotate video element", () => {
       container.appendChild(canvas);
       visualElement = canvas;
 
-      stream._streamCanvas = {
+      stream._streamCanvases[0] = {
         resize() {},
         stop() {},
       };

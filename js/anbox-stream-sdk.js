@@ -148,7 +148,7 @@ class AnboxStream {
    * @param [options.experimental.disableBrowserBlock=false] {boolean} Don't throw an error if an unsupported browser is detected.
    * @param [options.experimental.emulatePointerEvent=true] {boolean} Emulate pointer events when their coordinates are outside of the video element.
    * @param [options.experimental.upscaling] {object} Experimental video upscaling features.
-   * @param [options.experimental.upscaling.enabled=false] {boolean} Enable upscaling for video streaming on the client side. Currently, the upscaling relies on AMD FidelityFX Super Resolution 1.0 (FSR).
+   * @param [options.experimental.upscaling.enabled=false] {boolean} Enable upscaling for video streaming on the client side. Currently, the upscaling relies on AMD FidelityFX Super Resolution 1.0 (FSR). When enabled, upscaling is applied to every display.
    * @param [options.experimental.upscaling.fragmentShaders] {string[]} Use custom fragment shader sources for upscaling instead of the default one, which is based on AMD FidelityFX Super Resolution 1.0 (FSR). This allows multi-pass shaders to be applied during the upscaling process. When a fragment shader is applied, the resulting framebuffer to which a texture is attached will be used as the source for the next shader in the list. Therefore, the order of shaders in the list is important.
    * @param [options.experimental.upscaling.useTargetFrameRate=false] {boolean} Use target refresh frame rate for the canvas when rendering video frames rather than relying on HTMLVideoElement.requestVideoFrameCallback() function even if it's supported by the browser due to the fact that the callback can occasionally be fired one v-sync late.
    * @param [options.experimental.debug=false] {boolean} Print debug logs
@@ -195,6 +195,7 @@ class AnboxStream {
           },
         }
       : {};
+    this._streamCanvases = {};
 
     // WebRTC
     this._webrtcManager = new AnboxWebRTCManager({
@@ -233,7 +234,9 @@ class AnboxStream {
     );
     this._webrtcManager.onIMEStateChanged(this._IMEStateChanged.bind(this));
     this._webrtcManager.onDiscoverMessageReceived((msg) => {
-      if (this._streamCanvas) this._streamCanvas.setTargetFps(msg.fps);
+      for (const canvas of Object.values(this._streamCanvases)) {
+        canvas.setTargetFps(msg.fps);
+      }
       if (msg.capabilities?.includes?.("vhal")) {
         this._vhalManager = new AnboxVhalManager(
           this._webrtcManager,
@@ -282,7 +285,6 @@ class AnboxStream {
     // Control options
     this._modifierState = 0;
     this._gamepadManager = null;
-    this._streamCanvas = null;
 
     this._originalOrientationByDisplay = {};
     this._rotationDegreesByDisplay = {};
@@ -407,13 +409,29 @@ class AnboxStream {
 
     this._multiDisplayActive = true;
 
-    const videoId =
-      displayId === 0 ? this._videoID : `${this._videoID}-display-${displayId}`;
+    const videoId = this._videoIdFor(displayId);
     const video = this._createExtraVideoElement(videoId, stream);
     container.appendChild(video);
 
+    let visualElement = video;
+    const upscaling = this._options.experimental.upscaling;
+    if (upscaling.enabled) {
+      visualElement = this._createStreamCanvasForDisplay(displayId, video);
+      container.appendChild(visualElement);
+      video.addEventListener(
+        "loadedmetadata",
+        () => this._streamCanvases[displayId].startRendering(),
+        { once: true },
+      );
+    }
+
     const computeDims = () =>
-      this._computeMultiDisplayDimensions(video, container, displayId);
+      this._computeMultiDisplayDimensions(
+        video,
+        container,
+        displayId,
+        visualElement,
+      );
     video.addEventListener("loadedmetadata", computeDims);
     video.addEventListener("resize", computeDims);
     video.addEventListener(
@@ -1082,11 +1100,8 @@ class AnboxStream {
         // Hence we do not start rendering until metadata event is fired.
         this._onResize();
 
-        if (
-          this._options.experimental.upscaling.enabled &&
-          this._streamCanvas
-        ) {
-          this._streamCanvas.startRendering();
+        if (this._streamCanvases[0]) {
+          this._streamCanvases[0].startRendering();
         }
       };
       mediaContainer.appendChild(video);
@@ -1095,22 +1110,7 @@ class AnboxStream {
 
       const upscaling = this._options.experimental.upscaling;
       if (upscaling.enabled) {
-        // Hide the video element and only make the canvas
-        // visible inside of the media container
-        video.style.display = "none";
-
-        this._streamCanvas = new AnboxStreamCanvas({
-          id: this._canvasID,
-          video: video,
-          useTargetFrameRate: upscaling.useTargetFrameRate,
-          fragmentShaders: upscaling.fragmentShaders,
-        });
-
-        this._streamCanvas.onFpsMeasured((fps) => {
-          this._webrtcManager.updateCanvasFpsStats(fps);
-        });
-
-        const canvas = this._streamCanvas.initialize();
+        const canvas = this._createStreamCanvasForDisplay(0, video);
         mediaContainer.appendChild(canvas);
         pointerLockElement = canvas;
       }
@@ -1239,6 +1239,41 @@ class AnboxStream {
     return video;
   }
 
+  _videoIdFor(displayId) {
+    return displayId === 0
+      ? this._videoID
+      : `${this._videoID}-display-${displayId}`;
+  }
+
+  _canvasIdFor(displayId) {
+    return displayId === 0
+      ? this._canvasID
+      : `${this._canvasID}-display-${displayId}`;
+  }
+
+  _createStreamCanvasForDisplay(displayId, video) {
+    const upscaling = this._options.experimental.upscaling;
+
+    // When upscaling is enabled, this display is rendered through a WebGL
+    // canvas instead of showing the <video> element directly, the video
+    // element stays in the DOM (hidden) as the source texture.
+    video.style.display = "none";
+
+    const streamCanvas = new AnboxStreamCanvas({
+      id: this._canvasIdFor(displayId),
+      video: video,
+      useTargetFrameRate: upscaling.useTargetFrameRate,
+      fragmentShaders: upscaling.fragmentShaders,
+    });
+
+    streamCanvas.onFpsMeasured((fps) => {
+      this._webrtcManager.updateCanvasFpsStats(fps, displayId);
+    });
+
+    this._streamCanvases[displayId] = streamCanvas;
+    return streamCanvas.initialize();
+  }
+
   _updateGridColumns(container) {
     const count = container.querySelectorAll(".anbox-stream-cell").length;
     const cols = Math.ceil(Math.sqrt(count));
@@ -1266,15 +1301,25 @@ class AnboxStream {
     // then Remove primary video and audio elements.
     for (const displayId of attachedIds) {
       if (displayId === 0) continue;
-      const el = document.getElementById(
-        `${this._videoID}-display-${displayId}`,
-      );
+      const el = document.getElementById(this._videoIdFor(displayId));
       if (el) el.remove();
     }
     const video = document.getElementById(this._videoID);
     const audio = document.getElementById(this._audioID);
     if (video) video.remove();
     if (audio) audio.remove();
+
+    // Stop and remove every upscaling canvas.
+    for (const [displayId, streamCanvas] of Object.entries(
+      this._streamCanvases,
+    )) {
+      streamCanvas.stop();
+      const canvasEl = document.getElementById(
+        this._canvasIdFor(Number(displayId)),
+      );
+      if (canvasEl) canvasEl.remove();
+    }
+    this._streamCanvases = {};
 
     // Disconnect ResizeObservers to avoid stale callbacks after teardown.
     for (const state of Object.values(this._displayStates)) {
@@ -1314,13 +1359,6 @@ class AnboxStream {
 
     this._webrtcManager.stop();
     this._removeMedia();
-
-    if (this._options.experimental.upscaling.enabled) {
-      this._streamCanvas.stop();
-
-      const canvas = document.getElementById(this._canvasID);
-      if (canvas) canvas.remove();
-    }
 
     this._options.callbacks.done();
   }
@@ -1595,11 +1633,10 @@ class AnboxStream {
       return false;
     }
 
-    const videoId =
-      displayId === 0 ? this._videoID : `${this._videoID}-display-${displayId}`;
+    const videoId = this._videoIdFor(displayId);
     let visualElement;
-    if (displayId === 0 && this._options.experimental.upscaling.enabled) {
-      visualElement = document.getElementById(this._canvasID);
+    if (this._streamCanvases[displayId]) {
+      visualElement = document.getElementById(this._canvasIdFor(displayId));
     } else {
       visualElement = document.getElementById(videoId);
     }
@@ -1656,13 +1693,17 @@ class AnboxStream {
     // layout changes (new display added, window resize) are reflected.
     if (this._multiDisplayActive) {
       const cell = document.getElementById(this._containerIDs[0]) || container;
-      this._computeMultiDisplayDimensions(video, cell, 0);
+      this._computeMultiDisplayDimensions(
+        video,
+        cell,
+        0,
+        document.getElementById(this._canvasIdFor(0)) || video,
+      );
       const extraIds = Object.keys(this._containerIDs)
         .map(Number)
         .filter((i) => i > 0);
       for (const i of extraIds) {
-        const secId = `${this._videoID}-display-${i}`;
-        const secVideo = document.getElementById(secId);
+        const secVideo = document.getElementById(this._videoIdFor(i));
         const secContainer = document.getElementById(this._containerIDs[i]);
         if (
           secVideo &&
@@ -1670,7 +1711,12 @@ class AnboxStream {
           secVideo.videoWidth > 0 &&
           secVideo.videoHeight > 0
         ) {
-          this._computeMultiDisplayDimensions(secVideo, secContainer, i);
+          this._computeMultiDisplayDimensions(
+            secVideo,
+            secContainer,
+            i,
+            document.getElementById(this._canvasIdFor(i)) || secVideo,
+          );
         }
       }
       return;
@@ -1715,11 +1761,11 @@ class AnboxStream {
     const playerWidth = Math.round(videoWidth * resizePercentage);
 
     let visualElement = video;
-    if (this._options.experimental.upscaling.enabled) {
-      visualElement = document.getElementById(this._canvasID);
+    if (this._streamCanvases[0]) {
+      visualElement = document.getElementById(this._canvasIdFor(0));
       // Adjust the viewport of WebGL inside of canvas to respect the
       // dimension of the video element if the upscaling is enabled.
-      this._streamCanvas.resize(video.videoWidth, video.videoHeight);
+      this._streamCanvases[0].resize(video.videoWidth, video.videoHeight);
     }
 
     let offsetTop;
@@ -1791,7 +1837,12 @@ class AnboxStream {
 
   // Compute dimensions for a display's video element inside its container
   // for multi-display mode.
-  _computeMultiDisplayDimensions(video, container, displayId) {
+  // NOTE: the `visualElement` is the DOM element that is actually visible
+  // and positioned on screen: the <video> element itself or its upscaling
+  // <canvas> counterpart when upscaling is enabled.
+  _computeMultiDisplayDimensions(video, container, displayId, visualElement) {
+    if (this._nullOrUndef(visualElement)) visualElement = video;
+
     const cRect = container.getBoundingClientRect();
     const cellWidth = cRect.width;
     const cellHeight = cRect.height;
@@ -1810,24 +1861,27 @@ class AnboxStream {
     const renderedWidth = Math.round(videoWidth * scale);
     const renderedHeight = Math.round(videoHeight * scale);
 
+    const streamCanvas = this._streamCanvases[displayId];
+    if (streamCanvas) streamCanvas.resize(video.videoWidth, video.videoHeight);
+
     if (isRotated) {
       // Size the element with its un-rotated dimensions so that once the CSS
       // `rotate()` transform is applied around its center, the resulting
       // on-screen bounding box matches renderedWidth and renderedHeight.
       const offsetLeft = Math.round((cellWidth - renderedHeight) / 2);
       const offsetTop = Math.round((cellHeight - renderedWidth) / 2);
-      video.style.width = renderedHeight + "px";
-      video.style.height = renderedWidth + "px";
-      video.style.left = offsetLeft + "px";
-      video.style.top = offsetTop + "px";
+      visualElement.style.width = renderedHeight + "px";
+      visualElement.style.height = renderedWidth + "px";
+      visualElement.style.left = offsetLeft + "px";
+      visualElement.style.top = offsetTop + "px";
     } else {
       const offsetLeft = Math.round((cellWidth - renderedWidth) / 2);
       const offsetTop = Math.round((cellHeight - renderedHeight) / 2);
-      // Size and position the video element to exactly match the rendered content.
-      video.style.width = renderedWidth + "px";
-      video.style.height = renderedHeight + "px";
-      video.style.left = offsetLeft + "px";
-      video.style.top = offsetTop + "px";
+      // Size and position the element to exactly match the rendered content.
+      visualElement.style.width = renderedWidth + "px";
+      visualElement.style.height = renderedHeight + "px";
+      visualElement.style.left = offsetLeft + "px";
+      visualElement.style.top = offsetTop + "px";
     }
 
     if (!(displayId in this._displayStates)) {
@@ -1978,13 +2032,17 @@ class AnboxStream {
       return true;
     }
 
-    // Multi-display mode: use the video element's actual rendered bounding rect.
-    const videoId =
-      displayId === 0 ? this._videoID : `${this._videoID}-display-${displayId}`;
+    // Multi-display mode: use the visual element's actual rendered bounding rect.
+    const videoId = this._videoIdFor(displayId);
     const video = document.getElementById(videoId);
     if (!video || !video.videoWidth || !video.videoHeight) return false;
 
-    const vRect = video.getBoundingClientRect();
+    const visualElement = this._streamCanvases[displayId]
+      ? document.getElementById(this._canvasIdFor(displayId))
+      : video;
+    if (!visualElement) return false;
+
+    const vRect = visualElement.getBoundingClientRect();
     if (vRect.width === 0 || vRect.height === 0) return false;
 
     // Swap width and height here too so scale/offset when a display is rotated
@@ -2978,7 +3036,10 @@ class AnboxWebRTCManager {
       },
       experimental: {
         canvas: {
+          // Kept for backward compatibility and mirrors the primary display's canvas FPS.
           fps: 0,
+          // Per-display upscaling canvas FPS.
+          displays: {},
         },
       },
     };
@@ -3377,8 +3438,9 @@ class AnboxWebRTCManager {
    * Update the Canvas FPS measurement
    * NOTE: only use this when upscaling is enabled
    */
-  updateCanvasFpsStats(fps) {
-    this._stats.experimental.canvas.fps = fps;
+  updateCanvasFpsStats(fps, displayId = 0) {
+    this._stats.experimental.canvas.displays[displayId] = fps;
+    if (displayId === 0) this._stats.experimental.canvas.fps = fps;
   }
 
   onDiscoverMessageReceived(callback) {
@@ -4396,9 +4458,14 @@ class AnboxWebRTCManager {
     insertStat("packetsReceived", this._stats.audioOutput.packetsReceived);
     insertStat("packetsLost", this._stats.audioOutput.packetsLost);
 
-    if (this._stats.experimental.canvas.fps > 0) {
+    const canvasFpsEntries = Object.entries(
+      this._stats.experimental.canvas.displays,
+    );
+    if (canvasFpsEntries.length > 0) {
       insertHeader("Canvas");
-      insertStat("fps", this._stats.experimental.canvas.fps);
+      for (const [displayId, fps] of canvasFpsEntries) {
+        insertStat(`fps (display ${displayId})`, fps);
+      }
     }
   }
 }

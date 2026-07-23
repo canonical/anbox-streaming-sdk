@@ -72,6 +72,11 @@ beforeEach(() => {
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.109 Safari/537.36",
   );
   global.navigator.__defineGetter__("maxTouchPoints", () => 5);
+  // Needed so that enabling `experimental.upscaling` in tests below passes
+  // the SDK's WebGL support check without requiring a real WebGL context.
+  window.HTMLCanvasElement.prototype.getContext = () => {
+    return {};
+  };
   addContainer("main-container");
   addContainer("cell-1");
   addContainer("cell-2");
@@ -338,6 +343,105 @@ describe("attachDisplay (dynamic mode)", () => {
     expect(2 in stream._displayStates).toBe(true);
     expect(stream._displayStates[2]).toBeDefined();
     expect(stream._displayStates[2].activeTouchPointers).toEqual([]);
+  });
+});
+
+describe("attachDisplay with upscaling enabled", () => {
+  function stubStreamCanvasCreation(stream) {
+    stream._createStreamCanvasForDisplay = jest.fn((displayId, video) => {
+      video.style.display = "none";
+      const canvasEl = document.createElement("canvas");
+      canvasEl.id = stream._canvasIdFor(displayId);
+      stream._streamCanvases[displayId] = {
+        resize: jest.fn(),
+        stop: jest.fn(),
+        startRendering: jest.fn(),
+        setTargetFps: jest.fn(),
+      };
+      return canvasEl;
+    });
+  }
+
+  function makeUpscalingStream(overrides = {}) {
+    return makeStream({
+      experimental: { upscaling: { enabled: true } },
+      ...overrides,
+    });
+  }
+
+  test("creates a canvas for an additional display and hides its video element", () => {
+    const stream = makeUpscalingStream();
+    stubStreamCanvasCreation(stream);
+    stream._pendingVideoTracks[1] = makeFakeStream();
+
+    stream.attachDisplay(1, "cell-1");
+
+    const video = document.getElementById(`${stream._videoID}-display-1`);
+    const canvas = document.getElementById(stream._canvasIdFor(1));
+    expect(video.style.display).toBe("none");
+    expect(canvas).not.toBeNull();
+    expect(canvas.parentElement).toBe(document.getElementById("cell-1"));
+    expect(stream._streamCanvases[1]).toBeDefined();
+  });
+
+  test("starts canvas rendering once the video's metadata is loaded", () => {
+    const stream = makeUpscalingStream();
+    stubStreamCanvasCreation(stream);
+    stream._pendingVideoTracks[1] = makeFakeStream();
+
+    stream.attachDisplay(1, "cell-1");
+    const video = document.getElementById(`${stream._videoID}-display-1`);
+    video.dispatchEvent(new Event("loadedmetadata"));
+
+    expect(stream._streamCanvases[1].startRendering).toHaveBeenCalledTimes(1);
+  });
+
+  test("_computeMultiDisplayDimensions sizes the canvas, not the hidden video", () => {
+    const stream = makeUpscalingStream();
+    stubStreamCanvasCreation(stream);
+    stream._pendingVideoTracks[1] = makeFakeStream();
+    stream.attachDisplay(1, "cell-1");
+
+    const video = document.getElementById(`${stream._videoID}-display-1`);
+    const canvas = document.getElementById(stream._canvasIdFor(1));
+    video.__defineGetter__("videoWidth", () => 400);
+    video.__defineGetter__("videoHeight", () => 800);
+
+    stream._computeMultiDisplayDimensions(
+      video,
+      document.getElementById("cell-1"),
+      1,
+      canvas,
+    );
+
+    expect(canvas.style.width).not.toBe("");
+    expect(canvas.style.height).not.toBe("");
+    expect(video.style.width).toBe("");
+    expect(stream._streamCanvases[1].resize).toHaveBeenCalledWith(400, 800);
+  });
+
+  test("_removeMedia stops and removes every per-display canvas", () => {
+    const stream = makeUpscalingStream();
+    stubStreamCanvasCreation(stream);
+    stream._pendingVideoTracks[0] = makeFakeStream();
+    stream._pendingVideoTracks[1] = makeFakeStream();
+    stream.attachDisplay(0, "main-container");
+    stream.attachDisplay(1, "cell-1");
+
+    const canvas0Id = stream._canvasIdFor(0);
+    const canvas1Id = stream._canvasIdFor(1);
+    const stopSpies = [
+      stream._streamCanvases[0].stop,
+      stream._streamCanvases[1].stop,
+    ];
+
+    stream._removeMedia();
+
+    expect(stopSpies[0]).toHaveBeenCalledTimes(1);
+    expect(stopSpies[1]).toHaveBeenCalledTimes(1);
+    expect(document.getElementById(canvas0Id)).toBeNull();
+    expect(document.getElementById(canvas1Id)).toBeNull();
+    expect(stream._streamCanvases).toEqual({});
   });
 });
 
