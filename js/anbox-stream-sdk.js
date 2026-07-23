@@ -4056,6 +4056,10 @@ class AnboxWebRTCManager {
   }
 
   _startStatsUpdater() {
+    // _onRtcTrack is invoked once per additional video/audio track.
+    // Guard against overlapping timers for multi-track sessions.
+    window.clearInterval(this._statsTimerId);
+
     let pcConf = this._pc.getConfiguration();
     if (pcConf) {
       if ("sdpSemantics" in pcConf)
