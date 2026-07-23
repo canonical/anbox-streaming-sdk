@@ -313,7 +313,7 @@ class AnboxStream {
    * Connect a new instance for the configured application or attach to an existing one
    */
   async connect() {
-    if (this._options.fullScreen) this._requestFullscreen();
+    if (this._options.fullScreen) this.requestFullscreen(0);
 
     let session = {};
     try {
@@ -516,19 +516,23 @@ class AnboxStream {
   }
 
   /**
-   * Toggle fullscreen for the streamed video.
+   * Toggle fullscreen for the streamed video of a given display.
    *
    * IMPORTANT: fullscreen can only be toggled following a user input.
    * If you call this method when your page loads, it will not work.
+   *
+   * @param {number} [displayId=0] Index of the display to show in full screen.
    */
-  _requestFullscreen() {
+  requestFullscreen(displayId = 0) {
     if (!document.fullscreenEnabled) {
       console.error("fullscreen not supported");
       return;
     }
+    const videoID =
+      displayId === 0 ? this._videoID : `${this._videoID}-display-${displayId}`;
     const fullscreenExited = () => {
       if (document.fullscreenElement === null) {
-        const video = document.getElementById(this._videoID);
+        const video = document.getElementById(videoID);
         if (video) {
           video.style.width = null;
           video.style.height = null;
@@ -544,7 +548,15 @@ class AnboxStream {
     // https://bugs.chromium.org/p/chromium/issues/detail?id=462164
     // To work around it we put the outer container in fullscreen and scale the video
     // to fit it. When exiting fullscreen we undo style changes done to the video element
-    const videoContainer = document.getElementById(this._containerIDs[0]);
+    const videoContainer = document.getElementById(
+      this._containerIDs[displayId],
+    );
+    if (!videoContainer) {
+      console.error(
+        `[AnboxStream] requestFullscreen(${displayId}): container not found for this display.`,
+      );
+      return;
+    }
     if (videoContainer.requestFullscreen) {
       videoContainer.requestFullscreen().catch((err) => {
         console.log(
