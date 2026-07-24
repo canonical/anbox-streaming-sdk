@@ -433,7 +433,19 @@ class AnboxStream {
         displayId,
         visualElement,
       );
-    video.addEventListener("loadedmetadata", computeDims);
+    video.addEventListener(
+      "loadedmetadata",
+      () => {
+        // Resize the canvas backing store to the video's real dimensions before
+        // starting the WebGL render loop. This ensure AnboxStreamCanvas sizes its
+        // framebuffers from the canvas's current width/height first time it renders.
+        computeDims();
+        if (this._streamCanvases[displayId]) {
+          this._streamCanvases[displayId].startRendering();
+        }
+      },
+      { once: true },
+    );
     video.addEventListener("resize", computeDims);
     video.addEventListener(
       "play",
