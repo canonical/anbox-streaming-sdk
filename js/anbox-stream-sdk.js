@@ -1568,7 +1568,6 @@ class AnboxStream {
     let degrees;
 
     if (!(displayId in this._displayStates)) {
-      console.error(`Invalid display id given: ${displayId}`);
       return false;
     }
 
