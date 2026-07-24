@@ -418,11 +418,12 @@ class AnboxStream {
     if (upscaling.enabled) {
       visualElement = this._createStreamCanvasForDisplay(displayId, video);
       container.appendChild(visualElement);
-      video.addEventListener(
-        "loadedmetadata",
-        () => this._streamCanvases[displayId].startRendering(),
-        { once: true },
-      );
+
+      // Explicitly call play() on the hidden video element as `autoplay` alone
+      // does not reliably trigger the "play" event once a video is hidden in
+      // some browsers, which would otherwise leave _pendingReadyCount stuck
+      // forever and the ready() callback never resolving.
+      video.play();
     }
 
     const computeDims = () =>
