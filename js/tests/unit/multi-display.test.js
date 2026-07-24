@@ -77,6 +77,9 @@ beforeEach(() => {
   window.HTMLCanvasElement.prototype.getContext = () => {
     return {};
   };
+  // jsdom does not implement media playback. Calling play() on hidden video
+  // elements logs "Not implemented: HTMLMediaElement.prototype.play" error.
+  window.HTMLMediaElement.prototype.play = () => Promise.resolve();
   addContainer("main-container");
   addContainer("cell-1");
   addContainer("cell-2");
