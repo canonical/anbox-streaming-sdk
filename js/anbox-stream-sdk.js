@@ -2984,6 +2984,7 @@ class AnboxWebRTCManager {
     this._audioInput_codec_id = null;
     // All video streams keyed by display id
     this._videoStreams = {};
+    this._midToDisplayId = {};
 
     this._stream = {
       video: options.enableVideoStream,
@@ -3748,6 +3749,7 @@ class AnboxWebRTCManager {
       case "answer": {
         const sdp = atob(msg.sdp);
         this._log(`got RTC ${msg.type}:\n${sdp}`);
+        this._updateMidToDisplayIdMap(sdp);
         this._pc
           .setRemoteDescription(
             new RTCSessionDescription({
@@ -3906,7 +3908,8 @@ class AnboxWebRTCManager {
   _onRtcTrack(event) {
     const kind = event.track.kind;
     if (kind === "video") {
-      const displayId = this._displayIdFromTrackId(event.track.id);
+      const mid = event.transceiver && event.transceiver.mid;
+      const displayId = this._displayIdFromMid(mid);
       // Wrap the single track in its own MediaStream. All video tracks share
       // the same stream_id on the server side so event.streams[0] is the same
       // MediaStream object for every track. A per-track MediaStream guarantees
@@ -4184,15 +4187,34 @@ class AnboxWebRTCManager {
     };
   }
 
+  _nullOrUndef(obj) {
+    return obj === null || obj === undefined;
+  }
+
   // The server assigns each video track the label "video_N" (where N is the
   // display id) when adding video transceiver. On client side, parsing it
-  // here from MediaStreamTrack.id gives us the correct display id.
-  // NOTE: older images use the legacy track name "video", hence treat
-  // those as primary display for backward compatibility.
-  _displayIdFromTrackId(trackId) {
-    if (typeof trackId === "string") {
-      const m = trackId.match(/^video_(\d+)$/);
-      if (m) return parseInt(m[1], 10);
+  // here from MediaStreamTrack.id gives us the correct display id but this
+  // only works for chrome as firefox implements the stricter spec behavior
+  // where `MediaStreamTrack.id` for received tracks is randomly generated
+  // Hence, parse the raw SDP blob as a cross-browser way to get the display Id.
+  _updateMidToDisplayIdMap(sdp) {
+    const sections = sdp.split(/^m=/m).slice(1);
+    for (const section of sections) {
+      if (!section.startsWith("video")) continue;
+
+      const midMatch = section.match(/^a=mid:(\S+)/m);
+      const msidMatch = section.match(/^a=msid:\S+\s+(\S+)/m);
+      if (!midMatch || !msidMatch) continue;
+
+      const labelMatch = msidMatch[1].match(/^video_(\d+)$/);
+      const displayId = labelMatch ? parseInt(labelMatch[1], 10) : 0;
+      this._midToDisplayId[midMatch[1]] = displayId;
+    }
+  }
+
+  _displayIdFromMid(mid) {
+    if (!this._nullOrUndef(mid) && mid in this._midToDisplayId) {
+      return this._midToDisplayId[mid];
     }
     return 0;
   }
@@ -4245,7 +4267,7 @@ class AnboxWebRTCManager {
         report.type === "inbound-rtp" &&
         (report.kind === "video" || report.mediaType === "video")
       ) {
-        const displayId = this._displayIdFromTrackId(report.trackIdentifier);
+        const displayId = this._displayIdFromMid(report.mid);
         if (!(displayId in this._stats.videoTracks))
           this._stats.videoTracks[displayId] = this._initVideoTrackStats();
         let v = this._stats.videoTracks[displayId];
