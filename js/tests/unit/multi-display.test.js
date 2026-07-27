@@ -294,8 +294,7 @@ describe("attachDisplay (dynamic mode)", () => {
 
     stream.attachDisplay(1, "cell-1");
 
-    const videoId = `${stream._videoID}-display-1`;
-    const video = document.getElementById(videoId);
+    const video = document.getElementById(stream._videoIdFor(1));
     expect(video).not.toBeNull();
     expect(video.srcObject).toBe(fakeStream);
     expect(stream._pendingVideoTracks[1]).toBeUndefined();
@@ -372,15 +371,18 @@ describe("attachDisplay with upscaling enabled", () => {
     });
   }
 
-  test("creates a canvas for an additional display and hides its video element", () => {
+  function setupStreamCanvasAndAttachDisplay() {
     const stream = makeUpscalingStream();
     stubStreamCanvasCreation(stream);
     stream._pendingVideoTracks[1] = makeFakeStream();
-
     stream.attachDisplay(1, "cell-1");
-
-    const video = document.getElementById(`${stream._videoID}-display-1`);
+    const video = document.getElementById(stream._videoIdFor(1));
     const canvas = document.getElementById(stream._canvasIdFor(1));
+    return { stream, video, canvas };
+  }
+
+  test("creates a canvas for an additional display and hides its video element", () => {
+    const { stream, video, canvas } = setupStreamCanvasAndAttachDisplay();
     expect(video.style.display).toBe("none");
     expect(canvas).not.toBeNull();
     expect(canvas.parentElement).toBe(document.getElementById("cell-1"));
@@ -388,25 +390,14 @@ describe("attachDisplay with upscaling enabled", () => {
   });
 
   test("starts canvas rendering once the video's metadata is loaded", () => {
-    const stream = makeUpscalingStream();
-    stubStreamCanvasCreation(stream);
-    stream._pendingVideoTracks[1] = makeFakeStream();
-
-    stream.attachDisplay(1, "cell-1");
-    const video = document.getElementById(`${stream._videoID}-display-1`);
+    const { stream, video } = setupStreamCanvasAndAttachDisplay();
     video.dispatchEvent(new Event("loadedmetadata"));
 
     expect(stream._streamCanvases[1].startRendering).toHaveBeenCalledTimes(1);
   });
 
   test("_computeMultiDisplayDimensions sizes the canvas, not the hidden video", () => {
-    const stream = makeUpscalingStream();
-    stubStreamCanvasCreation(stream);
-    stream._pendingVideoTracks[1] = makeFakeStream();
-    stream.attachDisplay(1, "cell-1");
-
-    const video = document.getElementById(`${stream._videoID}-display-1`);
-    const canvas = document.getElementById(stream._canvasIdFor(1));
+    const { stream, video, canvas } = setupStreamCanvasAndAttachDisplay();
     video.__defineGetter__("videoWidth", () => 400);
     video.__defineGetter__("videoHeight", () => 800);
 
@@ -417,8 +408,9 @@ describe("attachDisplay with upscaling enabled", () => {
       canvas,
     );
 
-    expect(canvas.style.width).not.toBe("");
-    expect(canvas.style.height).not.toBe("");
+    // Keep the aspect ratio
+    expect(canvas.style.width).toBe("300px");
+    expect(canvas.style.height).toBe("600px");
     expect(video.style.width).toBe("");
     expect(stream._streamCanvases[1].resize).toHaveBeenCalledWith(400, 800);
   });
@@ -465,7 +457,7 @@ describe("per-display input routing", () => {
     stream._pendingVideoTracks[1] = fakeStream;
     stream.attachDisplay(1, "cell-1");
 
-    const video1 = document.getElementById(`${stream._videoID}-display-1`);
+    const video1 = document.getElementById(stream._videoIdFor(1));
     if (video1) {
       video1.__defineGetter__("videoWidth", () => 400);
       video1.__defineGetter__("videoHeight", () => 300);
@@ -804,7 +796,7 @@ describe("rotation in multi-display mode", () => {
 
     stream._pendingVideoTracks[1] = makeFakeStream();
     stream.attachDisplay(1, "cell-1");
-    const video1 = document.getElementById(`${stream._videoID}-display-1`);
+    const video1 = document.getElementById(stream._videoIdFor(1));
     video1.__defineGetter__("videoWidth", () => 400);
     video1.__defineGetter__("videoHeight", () => 300);
 
