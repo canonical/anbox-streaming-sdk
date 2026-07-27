@@ -382,12 +382,14 @@ test("stats overlay shows a section per display in multi video track sessions", 
 
   mgr._webrtcManager._statsOverlayID = overlayContainer.id;
   mgr._webrtcManager.showStatsOverlay();
+  mgr._webrtcManager._midToDisplayId = { 0: 0, 1: 1 };
   mgr._webrtcManager._processRawStats([
     {
       timestamp: 1234,
       type: "inbound-rtp",
       kind: "video",
       trackIdentifier: "video_0",
+      mid: "0",
       framesPerSecond: 60,
       bytesReceived: 1000000,
       totalAssemblyTime: 0,
@@ -397,6 +399,7 @@ test("stats overlay shows a section per display in multi video track sessions", 
       type: "inbound-rtp",
       kind: "video",
       trackIdentifier: "video_1",
+      mid: "1",
       framesPerSecond: 30,
       bytesReceived: 500000,
       totalAssemblyTime: 0,
@@ -420,6 +423,7 @@ test("per-display video stats are tracked separately for multi video track sessi
       type: "inbound-rtp",
       kind: "video",
       trackIdentifier: "video_0",
+      mid: "0",
       framesPerSecond: 30,
       packetsReceived: 10,
       bytesReceived: 1000,
@@ -429,6 +433,7 @@ test("per-display video stats are tracked separately for multi video track sessi
       type: "inbound-rtp",
       kind: "video",
       trackIdentifier: "video_1",
+      mid: "1",
       framesPerSecond: 60,
       packetsReceived: 20,
       bytesReceived: 2000,
@@ -438,12 +443,14 @@ test("per-display video stats are tracked separately for multi video track sessi
       type: "inbound-rtp",
       kind: "video",
       trackIdentifier: "video_2",
+      mid: "2",
       framesPerSecond: 15,
       packetsReceived: 5,
       bytesReceived: 500,
     },
   ];
 
+  mgr._webrtcManager._midToDisplayId = { 0: 0, 1: 1, 2: 2 };
   mgr._webrtcManager._processRawStats(data);
   const stats = mgr._webrtcManager.getStats();
 
