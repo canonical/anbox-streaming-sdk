@@ -1117,6 +1117,7 @@ class AnboxStream {
           this._streamCanvases[0].startRendering();
         }
       };
+      video.addEventListener("resize", this._onResize);
       mediaContainer.appendChild(video);
 
       pointerLockElement = video;
