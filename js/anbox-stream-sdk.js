@@ -1163,6 +1163,10 @@ class AnboxStream {
         }
       } else {
         const video = document.getElementById(this._videoID);
+        if (!video) {
+          console.warn("Video element not found, ignoring stream track");
+          return;
+        }
         video.srcObject = videoSource;
 
         // Expliclity to call play() method to the video element if it's hidden,
@@ -1174,6 +1178,10 @@ class AnboxStream {
 
     if (this._options.stream.audio && this._options.devices.speaker) {
       const audio = document.getElementById(this._audioID);
+      if (!audio) {
+        console.warn("Audio element not found, ignoring stream track");
+        return;
+      }
       audio.srcObject = audioSource;
     }
 
