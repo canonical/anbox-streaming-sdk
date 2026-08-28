@@ -90,18 +90,19 @@ test("AOSP visual tests: touch and keyboard input", async ({ page }) => {
   await openSearchBar(page);
   await typeSearch(page, "Settings");
 
-  await tapHomeButton(page);
   await disconnectStream(page);
 });
 
 test("AOSP visual tests: long press input", async ({ page }) => {
   await joinSession(page, process.env.AOSP_SESSION_ID);
+  await tapHomeButton(page);
   await longPressHome(page);
   await disconnectStream(page);
 });
 
 test("AOSP visual tests: swipe", async ({ page }) => {
   await joinSession(page, process.env.AOSP_SESSION_ID);
+  await tapHomeButton(page);
   await swipeVertically(page, "openStatusBar");
   // Wait 1s (system UI expand animation)
   await page.waitForTimeout(1000);
