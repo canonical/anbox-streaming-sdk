@@ -27,7 +27,7 @@
     "axios": "1.18.0",
     "compressing": "1.10.5",
     "dotenv": "16.4.7",
-    "express": "4.22.2",
+    "express": "5.2.1",
     "express-rate-limit": "7.5.0",
     "qs": "6.16.0",
     "yaml": "2.8.3"
