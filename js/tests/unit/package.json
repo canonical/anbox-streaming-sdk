@@ -12,7 +12,7 @@
     "testEnvironment": "jsdom"
   },
   "devDependencies": {
-    "@babel/core": "^7.26.0",
+    "@babel/core": "^7.29.6",
     "@babel/preset-env": "^7.26.0",
     "@eslint/js": "9.17.0",
     "@eslint/eslintrc": "3.2.0",
