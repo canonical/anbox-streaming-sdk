@@ -216,7 +216,12 @@ class AnboxStream {
       preferredVideoDecoderCodecs: this._options.video.preferred_decoder_codecs,
     });
     this._webrtcManager.onReady(this._webrtcReady.bind(this));
-    this._webrtcManager.onExtraVideoTrack(this._onExtraVideoTrack.bind(this));
+    this._webrtcManager.onExtraVideoTrackAdded(
+      this._onExtraVideoTrackAdded.bind(this),
+    );
+    this._webrtcManager.onExtraVideoTrackEnded(
+      this._onExtraVideoTrackEnded.bind(this),
+    );
     this._webrtcManager.onError((err) => {
       this._stopStreamingOnError(err.message, err.cause.code);
     });
@@ -1193,7 +1198,7 @@ class AnboxStream {
     }
   }
 
-  _onExtraVideoTrack(displayId, stream) {
+  _onExtraVideoTrackAdded(displayId, stream) {
     const videoId = `${this._videoID}-display-${displayId}`;
     if (document.getElementById(videoId)) {
       document.getElementById(videoId).srcObject = stream;
@@ -1203,6 +1208,10 @@ class AnboxStream {
     this._pendingReadyCount++;
     this._pendingVideoTracks[displayId] = stream;
     this._options.callbacks.videoTrackAdded(displayId);
+  }
+
+  _onExtraVideoTrackEnded(displayId) {
+    this._options.callbacks.videoTrackRemoved(displayId);
   }
 
   _createExtraVideoElement(id, stream) {
@@ -3036,7 +3045,9 @@ class AnboxWebRTCManager {
     this._onReady = (videoStream, audioStream) => {};
     this._onClose = () => {};
     // eslint-disable-next-line no-unused-vars
-    this._onExtraVideoTrack = (displayId, stream) => {};
+    this._onExtraVideoTrackAdded = (displayId, stream) => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onExtraVideoTrackEnded = (displayId) => {};
     this._onMicRequested = () => false;
     this._onCameraRequested = () => false;
     // eslint-disable-next-line no-unused-vars
@@ -3073,19 +3084,29 @@ class AnboxWebRTCManager {
   }
 
   /**
-   * @callback onExtraVideoTrack
+   * @callback onExtraVideoTrackAdded
    * @param displayId {number} zero-based display id derived from the server-assigned
    *   track name.
    * @param stream {MediaStream} Stream to attach to the extra video element
    */
   /**
    * Called when an additional video track is received.
-   * The display id is parsed from the server-assigned track name and is
-   * stable even when displays are added or removed dynamically.
-   * @param callback {onExtraVideoTrack}
+   * @param callback {onExtraVideoTrackAdded}
    */
-  onExtraVideoTrack(callback) {
-    this._onExtraVideoTrack = callback;
+  onExtraVideoTrackAdded(callback) {
+    this._onExtraVideoTrackAdded = callback;
+  }
+
+  /**
+   * @callback onExtraVideoTrackEnded
+   * @param displayId {number} zero-based display id whose track just ended.
+   */
+  /**
+   * Called when an additional display's video track ends,
+   * @param callback {onExtraVideoTrackEnded}
+   */
+  onExtraVideoTrackEnded(callback) {
+    this._onExtraVideoTrackEnded = callback;
   }
 
   /**
@@ -3884,9 +3905,8 @@ class AnboxWebRTCManager {
         event.track.onended = this._onClose;
       } else {
         // Notify AnboxStream to attach the new video track to a video container.
-        this._onExtraVideoTrack(displayId, singleTrackStream);
-        event.track.onended = () =>
-          this._options.callbacks.videoTrackRemoved(displayId);
+        this._onExtraVideoTrackAdded(displayId, singleTrackStream);
+        event.track.onended = () => this._onExtraVideoTrackEnded(displayId);
       }
     } else if (kind === "audio") {
       this._audioStream = event.streams[0];
