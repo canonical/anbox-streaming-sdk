@@ -214,50 +214,6 @@ describe("_createExtraVideoElement", () => {
   });
 });
 
-describe("_updateGridColumns", () => {
-  function makeGrid(cellCount) {
-    const container = document.createElement("div");
-    for (let i = 0; i < cellCount; i++) {
-      const cell = document.createElement("div");
-      cell.className = "anbox-stream-cell";
-      container.appendChild(cell);
-    }
-    return container;
-  }
-
-  test("1 display: 1 column, 1 row", () => {
-    const stream = makeStreamWithTarget();
-    const container = makeGrid(1);
-    stream._updateGridColumns(container);
-    expect(container.style.gridTemplateColumns).toBe("repeat(1, 1fr)");
-    expect(container.style.gridTemplateRows).toBe("repeat(1, 1fr)");
-  });
-
-  test("2 displays: 2 columns, 1 row", () => {
-    const stream = makeStreamWithTarget();
-    const container = makeGrid(2);
-    stream._updateGridColumns(container);
-    expect(container.style.gridTemplateColumns).toBe("repeat(2, 1fr)");
-    expect(container.style.gridTemplateRows).toBe("repeat(1, 1fr)");
-  });
-
-  test("3 displays: 2 columns, 2 rows", () => {
-    const stream = makeStreamWithTarget();
-    const container = makeGrid(3);
-    stream._updateGridColumns(container);
-    expect(container.style.gridTemplateColumns).toBe("repeat(2, 1fr)");
-    expect(container.style.gridTemplateRows).toBe("repeat(2, 1fr)");
-  });
-
-  test("4 displays: 2 columns, 2 rows", () => {
-    const stream = makeStreamWithTarget();
-    const container = makeGrid(4);
-    stream._updateGridColumns(container);
-    expect(container.style.gridTemplateColumns).toBe("repeat(2, 1fr)");
-    expect(container.style.gridTemplateRows).toBe("repeat(2, 1fr)");
-  });
-});
-
 describe("attachDisplay (legacy mode)", () => {
   test("attachDisplay(0) is a no-op when targetElement is set", () => {
     const stream = makeStreamWithTarget("main-container");

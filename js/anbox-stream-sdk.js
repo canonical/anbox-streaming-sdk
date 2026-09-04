@@ -1205,48 +1205,6 @@ class AnboxStream {
     this._options.callbacks.videoTrackAdded(displayId);
   }
 
-  _activateMultiDisplayGrid(container) {
-    this._multiDisplayActive = true;
-
-    // Wrap the primary video in a dedicated cell div so it becomes one
-    // equal grid item alongside the additional display cells.
-    const cell = document.createElement("div");
-    cell.id = `${this._videoID}-cell-0`;
-    cell.className = "anbox-stream-cell";
-    cell.style.position = "relative";
-    cell.style.overflow = "hidden";
-
-    const primaryVideo = document.getElementById(this._videoID);
-    if (primaryVideo) {
-      // Make the primary video fill its new cell via absolute positioning,
-      // consistent with how secondary videos are rendered.
-      primaryVideo.style.position = "absolute";
-      primaryVideo.style.inset = "0";
-      primaryVideo.style.width = "100%";
-      primaryVideo.style.height = "100%";
-      primaryVideo.style.objectFit = "contain";
-      primaryVideo.style.top = "";
-      primaryVideo.style.left = "";
-      primaryVideo.style.maxWidth = "";
-      primaryVideo.style.maxHeight = "";
-      cell.appendChild(primaryVideo);
-    }
-    container.insertBefore(cell, container.firstChild);
-
-    // Move the display 0 input zone from the outer container to cell-0 so
-    // pointer events are scoped to the actual video area.
-    this._unregisterInputHandlers(0);
-    this._containerIDs[0] = cell.id;
-    this._registerInputHandlers(0, cell);
-
-    container.style.display = "grid";
-    container.style.width = "100%";
-    container.style.height = "100%";
-    container.style.gap = "0";
-    container.style.overflow = "hidden";
-    container.style.boxSizing = "border-box";
-  }
-
   _createExtraVideoElement(id, stream) {
     const video = document.createElement("video");
     video.id = id;
@@ -1294,14 +1252,6 @@ class AnboxStream {
 
     this._streamCanvases[displayId] = streamCanvas;
     return streamCanvas.initialize();
-  }
-
-  _updateGridColumns(container) {
-    const count = container.querySelectorAll(".anbox-stream-cell").length;
-    const cols = Math.ceil(Math.sqrt(count));
-    const rows = Math.ceil(count / cols);
-    container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-    container.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
   }
 
   _removeMedia() {
