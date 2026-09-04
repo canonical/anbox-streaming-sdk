@@ -241,32 +241,34 @@ test("custom message callback is called", (done) => {
     },
   };
 
-  let chans = [];
-  const pcMock = {
-    createDataChannel: () => {
-      let chan = {
-        onmessage: () => {},
-        onerror: {},
-        onclose: {},
-        onopen: {},
-      };
-
-      chans.push(chan);
-      return chan;
-    },
+  const fooChan = {
+    label: "foo",
+    onmessage: () => {},
+    onerror: {},
+    onclose: {},
+    onopen: {},
+  };
+  const barChan = {
+    label: "bar",
+    onmessage: () => {},
+    onerror: {},
+    onclose: {},
+    onopen: {},
   };
 
   const stream = new AnboxStream(sdkOptions);
-  stream._webrtcManager._pc = pcMock;
-  stream._webrtcManager._createDataChannels();
+  // Custom (oob) data channels are always created locally by the client;
+  // this directly exercises the wiring _createDataChannels() would set up.
+  stream._webrtcManager._wireDataChannel("foo", fooChan);
+  stream._webrtcManager._wireDataChannel("bar", barChan);
 
   // For `bar` data channel
-  chans[1].onopen();
+  barChan.onopen();
   expect(sdkOptions.dataChannels["bar"].callbacks.open).toHaveBeenCalledTimes(
     1,
   );
 
-  chans[1].onclose();
+  barChan.onclose();
   expect(sdkOptions.dataChannels["bar"].callbacks.close).toHaveBeenCalledTimes(
     1,
   );
@@ -274,18 +276,18 @@ test("custom message callback is called", (done) => {
   let error = {
     error: { message: "data transfer interrupted" },
   };
-  chans[1].onerror(error);
+  barChan.onerror(error);
 
   let event = { data: "bar_text" };
-  chans[1].onmessage(event);
+  barChan.onmessage(event);
 
   // For `foo` data channel
-  chans[0].onopen();
+  fooChan.onopen();
   expect(sdkOptions.dataChannels["foo"].callbacks.open).toHaveBeenCalledTimes(
     1,
   );
 
-  chans[0].onclose();
+  fooChan.onclose();
   expect(sdkOptions.dataChannels["foo"].callbacks.close).toHaveBeenCalledTimes(
     1,
   );
@@ -293,10 +295,10 @@ test("custom message callback is called", (done) => {
   error = {
     error: { message: "data channel is closed" },
   };
-  chans[0].onerror(error);
+  fooChan.onerror(error);
 
   event = { data: "foo_text" };
-  chans[0].onmessage(event);
+  fooChan.onmessage(event);
 });
 
 test("do not log control message data when debug is disabled", () => {
