@@ -3595,6 +3595,7 @@ class AnboxWebRTCManager {
     this._pc.oniceconnectionstatechange =
       this._onRtcIceConnectionStateChange.bind(this);
     this._pc.onicecandidate = this._onRtcIceCandidate.bind(this);
+    this._pc.ondatachannel = this._onRtcDataChannel.bind(this);
 
     this._createControlChannel();
 
@@ -3648,7 +3649,14 @@ class AnboxWebRTCManager {
   }
 
   _createControlChannel() {
-    this._controlChan = this._pc.createDataChannel("control");
+    // With API version >= 2 the server is the SDP offerer and already
+    // creates the "control" data channel before generating its offer.
+    if (this._apiVersionInUse < 2)
+      this._wireControlChannel(this._pc.createDataChannel("control"));
+  }
+
+  _wireControlChannel(channel) {
+    this._controlChan = channel;
     this._controlChan.onopen = this._onControlChannelOpen;
     this._controlChan.onmessage = this._onControlMessageReceived.bind(this);
     this._controlChan.onerror = (err) => {
@@ -3668,16 +3676,29 @@ class AnboxWebRTCManager {
   }
 
   _createDataChannels() {
+    // Unlike control channels, oob data channels are always initiated locally
+    // by the client. The server waits for the client channel to arrive before
+    // it starts forwarding data.
     Object.keys(this._dataChannels).forEach((name) => {
-      let channel = this._pc.createDataChannel(name);
-      channel.onmessage = (event) =>
-        this._dataChannels[name].callbacks.message(event.data);
-      channel.onerror = (err) =>
-        this._dataChannels[name].callbacks.error(err.error.message);
-      channel.onclose = () => this._dataChannels[name].callbacks.close();
-      channel.onopen = () => this._dataChannels[name].callbacks.open();
-      this._dataChans[name] = channel;
+      this._wireDataChannel(name, this._pc.createDataChannel(name));
     });
+  }
+
+  _wireDataChannel(name, channel) {
+    channel.onmessage = (event) =>
+      this._dataChannels[name].callbacks.message(event.data);
+    channel.onerror = (err) =>
+      this._dataChannels[name].callbacks.error(err.error.message);
+    channel.onclose = () => this._dataChannels[name].callbacks.close();
+    channel.onopen = () => this._dataChannels[name].callbacks.open();
+    this._dataChans[name] = channel;
+  }
+
+  _onRtcDataChannel(event) {
+    // Only the "control" data channel is expected here as with API version
+    // >= 2. See _createControlChannel() for details.
+    const channel = event.channel;
+    if (channel.label === "control") this._wireControlChannel(channel);
   }
 
   _onWsError(err) {
