@@ -140,13 +140,13 @@ describe("_checkReady", () => {
   });
 });
 
-describe("_onExtraVideoTrack", () => {
+describe("_onExtraVideoTrackAdded", () => {
   test("increments pendingReadyCount and stores stream in pendingVideoTracks", () => {
     const stream = makeStreamWithTarget();
     const fakeStream = makeFakeStream();
 
     expect(stream._pendingReadyCount).toBe(0);
-    stream._onExtraVideoTrack(1, fakeStream);
+    stream._onExtraVideoTrackAdded(1, fakeStream);
 
     expect(stream._pendingReadyCount).toBe(1);
     expect(stream._pendingVideoTracks[1]).toBe(fakeStream);
@@ -159,7 +159,7 @@ describe("_onExtraVideoTrack", () => {
       callbacks: { videoTrackAdded },
     });
 
-    stream._onExtraVideoTrack(2, makeFakeStream());
+    stream._onExtraVideoTrackAdded(2, makeFakeStream());
 
     expect(videoTrackAdded).toHaveBeenCalledWith(2);
   });
@@ -167,9 +167,9 @@ describe("_onExtraVideoTrack", () => {
   test("increments pendingReadyCount for each new extra track", () => {
     const stream = makeStreamWithTarget();
 
-    stream._onExtraVideoTrack(1, makeFakeStream());
-    stream._onExtraVideoTrack(2, makeFakeStream());
-    stream._onExtraVideoTrack(3, makeFakeStream());
+    stream._onExtraVideoTrackAdded(1, makeFakeStream());
+    stream._onExtraVideoTrackAdded(2, makeFakeStream());
+    stream._onExtraVideoTrackAdded(3, makeFakeStream());
 
     expect(stream._pendingReadyCount).toBe(3);
     expect(stream._pendingVideoTracks[1]).toBeDefined();
@@ -187,12 +187,42 @@ describe("_onExtraVideoTrack", () => {
     videoEl.id = `${stream._videoID}-display-1`;
     document.body.appendChild(videoEl);
 
-    stream._onExtraVideoTrack(1, fakeStream1);
+    stream._onExtraVideoTrackAdded(1, fakeStream1);
     // pendingReadyCount should NOT increment since video already exists.
     expect(stream._pendingReadyCount).toBe(0);
 
-    stream._onExtraVideoTrack(1, fakeStream2);
+    stream._onExtraVideoTrackAdded(1, fakeStream2);
     expect(videoEl.srcObject).toBe(fakeStream2);
+  });
+});
+
+describe("_onExtraVideoTrackEnded", () => {
+  test("fires videoTrackRemoved callback with the correct displayId", () => {
+    const videoTrackRemoved = jest.fn();
+    const stream = makeStream({
+      targetElement: "main-container",
+      callbacks: { videoTrackRemoved },
+    });
+
+    stream._onExtraVideoTrackEnded(2);
+
+    expect(videoTrackRemoved).toHaveBeenCalledTimes(1);
+    expect(videoTrackRemoved).toHaveBeenCalledWith(2);
+  });
+
+  test("fires videoTrackRemoved independently for each displayId", () => {
+    const videoTrackRemoved = jest.fn();
+    const stream = makeStream({
+      targetElement: "main-container",
+      callbacks: { videoTrackRemoved },
+    });
+
+    stream._onExtraVideoTrackEnded(1);
+    stream._onExtraVideoTrackEnded(3);
+
+    expect(videoTrackRemoved).toHaveBeenCalledTimes(2);
+    expect(videoTrackRemoved).toHaveBeenNthCalledWith(1, 1);
+    expect(videoTrackRemoved).toHaveBeenNthCalledWith(2, 3);
   });
 });
 
@@ -211,50 +241,6 @@ describe("_createExtraVideoElement", () => {
     expect(video.controls).toBe(false);
     expect(video.playsInline).toBe(true);
     expect(video.style.position).toBe("absolute");
-  });
-});
-
-describe("_updateGridColumns", () => {
-  function makeGrid(cellCount) {
-    const container = document.createElement("div");
-    for (let i = 0; i < cellCount; i++) {
-      const cell = document.createElement("div");
-      cell.className = "anbox-stream-cell";
-      container.appendChild(cell);
-    }
-    return container;
-  }
-
-  test("1 display: 1 column, 1 row", () => {
-    const stream = makeStreamWithTarget();
-    const container = makeGrid(1);
-    stream._updateGridColumns(container);
-    expect(container.style.gridTemplateColumns).toBe("repeat(1, 1fr)");
-    expect(container.style.gridTemplateRows).toBe("repeat(1, 1fr)");
-  });
-
-  test("2 displays: 2 columns, 1 row", () => {
-    const stream = makeStreamWithTarget();
-    const container = makeGrid(2);
-    stream._updateGridColumns(container);
-    expect(container.style.gridTemplateColumns).toBe("repeat(2, 1fr)");
-    expect(container.style.gridTemplateRows).toBe("repeat(1, 1fr)");
-  });
-
-  test("3 displays: 2 columns, 2 rows", () => {
-    const stream = makeStreamWithTarget();
-    const container = makeGrid(3);
-    stream._updateGridColumns(container);
-    expect(container.style.gridTemplateColumns).toBe("repeat(2, 1fr)");
-    expect(container.style.gridTemplateRows).toBe("repeat(2, 1fr)");
-  });
-
-  test("4 displays: 2 columns, 2 rows", () => {
-    const stream = makeStreamWithTarget();
-    const container = makeGrid(4);
-    stream._updateGridColumns(container);
-    expect(container.style.gridTemplateColumns).toBe("repeat(2, 1fr)");
-    expect(container.style.gridTemplateRows).toBe("repeat(2, 1fr)");
   });
 });
 
@@ -632,8 +618,8 @@ describe("videoTrackAdded and videoTrackRemoved callbacks", () => {
       callbacks: { videoTrackAdded: (i) => added.push(i) },
     });
 
-    stream._onExtraVideoTrack(1, makeFakeStream());
-    stream._onExtraVideoTrack(2, makeFakeStream());
+    stream._onExtraVideoTrackAdded(1, makeFakeStream());
+    stream._onExtraVideoTrackAdded(2, makeFakeStream());
 
     expect(added).toEqual([1, 2]);
   });

@@ -216,7 +216,12 @@ class AnboxStream {
       preferredVideoDecoderCodecs: this._options.video.preferred_decoder_codecs,
     });
     this._webrtcManager.onReady(this._webrtcReady.bind(this));
-    this._webrtcManager.onExtraVideoTrack(this._onExtraVideoTrack.bind(this));
+    this._webrtcManager.onExtraVideoTrackAdded(
+      this._onExtraVideoTrackAdded.bind(this),
+    );
+    this._webrtcManager.onExtraVideoTrackEnded(
+      this._onExtraVideoTrackEnded.bind(this),
+    );
     this._webrtcManager.onError((err) => {
       this._stopStreamingOnError(err.message, err.cause.code);
     });
@@ -1193,7 +1198,7 @@ class AnboxStream {
     }
   }
 
-  _onExtraVideoTrack(displayId, stream) {
+  _onExtraVideoTrackAdded(displayId, stream) {
     const videoId = `${this._videoID}-display-${displayId}`;
     if (document.getElementById(videoId)) {
       document.getElementById(videoId).srcObject = stream;
@@ -1205,46 +1210,8 @@ class AnboxStream {
     this._options.callbacks.videoTrackAdded(displayId);
   }
 
-  _activateMultiDisplayGrid(container) {
-    this._multiDisplayActive = true;
-
-    // Wrap the primary video in a dedicated cell div so it becomes one
-    // equal grid item alongside the additional display cells.
-    const cell = document.createElement("div");
-    cell.id = `${this._videoID}-cell-0`;
-    cell.className = "anbox-stream-cell";
-    cell.style.position = "relative";
-    cell.style.overflow = "hidden";
-
-    const primaryVideo = document.getElementById(this._videoID);
-    if (primaryVideo) {
-      // Make the primary video fill its new cell via absolute positioning,
-      // consistent with how secondary videos are rendered.
-      primaryVideo.style.position = "absolute";
-      primaryVideo.style.inset = "0";
-      primaryVideo.style.width = "100%";
-      primaryVideo.style.height = "100%";
-      primaryVideo.style.objectFit = "contain";
-      primaryVideo.style.top = "";
-      primaryVideo.style.left = "";
-      primaryVideo.style.maxWidth = "";
-      primaryVideo.style.maxHeight = "";
-      cell.appendChild(primaryVideo);
-    }
-    container.insertBefore(cell, container.firstChild);
-
-    // Move the display 0 input zone from the outer container to cell-0 so
-    // pointer events are scoped to the actual video area.
-    this._unregisterInputHandlers(0);
-    this._containerIDs[0] = cell.id;
-    this._registerInputHandlers(0, cell);
-
-    container.style.display = "grid";
-    container.style.width = "100%";
-    container.style.height = "100%";
-    container.style.gap = "0";
-    container.style.overflow = "hidden";
-    container.style.boxSizing = "border-box";
+  _onExtraVideoTrackEnded(displayId) {
+    this._options.callbacks.videoTrackRemoved(displayId);
   }
 
   _createExtraVideoElement(id, stream) {
@@ -1294,14 +1261,6 @@ class AnboxStream {
 
     this._streamCanvases[displayId] = streamCanvas;
     return streamCanvas.initialize();
-  }
-
-  _updateGridColumns(container) {
-    const count = container.querySelectorAll(".anbox-stream-cell").length;
-    const cols = Math.ceil(Math.sqrt(count));
-    const rows = Math.ceil(count / cols);
-    container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-    container.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
   }
 
   _removeMedia() {
@@ -3086,7 +3045,9 @@ class AnboxWebRTCManager {
     this._onReady = (videoStream, audioStream) => {};
     this._onClose = () => {};
     // eslint-disable-next-line no-unused-vars
-    this._onExtraVideoTrack = (displayId, stream) => {};
+    this._onExtraVideoTrackAdded = (displayId, stream) => {};
+    // eslint-disable-next-line no-unused-vars
+    this._onExtraVideoTrackEnded = (displayId) => {};
     this._onMicRequested = () => false;
     this._onCameraRequested = () => false;
     // eslint-disable-next-line no-unused-vars
@@ -3123,19 +3084,29 @@ class AnboxWebRTCManager {
   }
 
   /**
-   * @callback onExtraVideoTrack
+   * @callback onExtraVideoTrackAdded
    * @param displayId {number} zero-based display id derived from the server-assigned
    *   track name.
    * @param stream {MediaStream} Stream to attach to the extra video element
    */
   /**
    * Called when an additional video track is received.
-   * The display id is parsed from the server-assigned track name and is
-   * stable even when displays are added or removed dynamically.
-   * @param callback {onExtraVideoTrack}
+   * @param callback {onExtraVideoTrackAdded}
    */
-  onExtraVideoTrack(callback) {
-    this._onExtraVideoTrack = callback;
+  onExtraVideoTrackAdded(callback) {
+    this._onExtraVideoTrackAdded = callback;
+  }
+
+  /**
+   * @callback onExtraVideoTrackEnded
+   * @param displayId {number} zero-based display id whose track just ended.
+   */
+  /**
+   * Called when an additional display's video track ends,
+   * @param callback {onExtraVideoTrackEnded}
+   */
+  onExtraVideoTrackEnded(callback) {
+    this._onExtraVideoTrackEnded = callback;
   }
 
   /**
@@ -3934,9 +3905,8 @@ class AnboxWebRTCManager {
         event.track.onended = this._onClose;
       } else {
         // Notify AnboxStream to attach the new video track to a video container.
-        this._onExtraVideoTrack(displayId, singleTrackStream);
-        event.track.onended = () =>
-          this._options.callbacks.videoTrackRemoved(displayId);
+        this._onExtraVideoTrackAdded(displayId, singleTrackStream);
+        event.track.onended = () => this._onExtraVideoTrackEnded(displayId);
       }
     } else if (kind === "audio") {
       this._audioStream = event.streams[0];
