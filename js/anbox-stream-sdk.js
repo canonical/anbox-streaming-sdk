@@ -5082,7 +5082,12 @@ class AnboxStreamGatewayConnector {
       );
 
     const response = await rawResp.json();
-    if (response === undefined || response.status !== "success")
+    if (this._nullOrUndef(response))
+      throw newError(
+        "failed to create session",
+        ANBOX_STREAM_SDK_ERROR_SESSION_FAILED,
+      );
+    if (response.status !== "success")
       throw newError(response.error, ANBOX_STREAM_SDK_ERROR_SESSION_FAILED);
 
     return {
@@ -5118,7 +5123,12 @@ class AnboxStreamGatewayConnector {
       );
 
     let response = await rawJoinResp.json();
-    if (response === undefined || response.status !== "success")
+    if (this._nullOrUndef(response))
+      throw newError(
+        "Session does not exist anymore",
+        ANBOX_STREAM_SDK_ERROR_SESSION_FAILED,
+      );
+    if (response.status !== "success")
       throw newError(response.error, ANBOX_STREAM_SDK_ERROR_SESSION_FAILED);
 
     return {
