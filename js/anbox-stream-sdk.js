@@ -1160,13 +1160,8 @@ class AnboxStream {
   _webrtcReady(videoSource, audioSource) {
     if (this._options.stream.video) {
       if (!this._options.targetElement) {
-        // Guard against _webrtcReady being called again on subsequent track
-        // arrivals (the WebRTC manager re-fires the ready callback for every
-        // track once the primary conditions are satisfied).
-        if (!(0 in this._pendingVideoTracks)) {
-          this._pendingVideoTracks[0] = videoSource;
-          this._options.callbacks.videoTrackAdded(0);
-        }
+        this._pendingVideoTracks[0] = videoSource;
+        this._options.callbacks.videoTrackAdded(0);
       } else {
         const video = document.getElementById(this._videoID);
         if (!video) {
@@ -2945,6 +2940,8 @@ class AnboxWebRTCManager {
 
     this._videoStream = null;
     this._audioStream = null;
+    this._readyFired = false;
+    this._receivedVideoDisplayIds = new Set();
     this._audioInputStream = null;
     this._videoInputStream = null;
     this._video_codec_ids = {};
@@ -3917,6 +3914,7 @@ class AnboxWebRTCManager {
       // each video element renders its own display independently.
       const singleTrackStream = new MediaStream([event.track]);
       this._videoStreams[displayId] = singleTrackStream;
+      this._receivedVideoDisplayIds.add(displayId);
 
       if (displayId === 0) {
         this._videoStream = singleTrackStream;
@@ -3934,14 +3932,25 @@ class AnboxWebRTCManager {
       this._audioStream.onremovetrack = this._onClose;
     }
 
+    const expectedVideoDisplayIds = Object.values(this._midToDisplayId);
+    const allVideoTracksReceived =
+      expectedVideoDisplayIds.length > 0 &&
+      expectedVideoDisplayIds.every((id) =>
+        this._receivedVideoDisplayIds.has(id),
+      );
+
     const audioOnly = !this._stream.video && this._stream.audio;
     const videoOnly = this._stream.video && !this._stream.audio;
-    // Do not fire ready callback until regarding tracks are available.
+    // Do not fire ready callback until regarding tracks are available, and
+    // only ever fire it once per session.
     if (
-      (audioOnly && this._audioStream) ||
-      (videoOnly && this._videoStream) ||
-      (this._videoStream && (!this._userMedia.speakers || this._audioStream))
+      !this._readyFired &&
+      ((audioOnly && this._audioStream) ||
+        (videoOnly && allVideoTracksReceived) ||
+        (allVideoTracksReceived &&
+          (!this._userMedia.speakers || this._audioStream)))
     ) {
+      this._readyFired = true;
       this._onReady(this._videoStream, this._audioStream);
       if (this._statsEnabled) this._startStatsUpdater();
     }
@@ -3994,7 +4003,8 @@ class AnboxWebRTCManager {
         // connected (where no track is going to be added to the peer connection),
         // instead of relying on RTCPeerConnection.ontrack callback function, we
         // should now fire the signal here to notify the caller that the stream is ready.
-        if (!this._stream.video && !this._stream.audio) {
+        if (!this._readyFired && !this._stream.video && !this._stream.audio) {
+          this._readyFired = true;
           this._onReady(this._videoStream, this._audioStream);
           if (this._statsEnabled) this._startStatsUpdater();
         }
